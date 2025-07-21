@@ -411,43 +411,6 @@ else:
     st.error("❌ Model not loaded")
     st.info("👈 Use the sidebar to download and load the model")
 
-# Instructions
-with st.expander("📖 Instructions & Setup"):
-    st.markdown("""
-### Quick Start:
-
-1. **Download Model**: Click "📥 Download Model" in the sidebar
-2. **Load Model**: Click "🔄 Load Model" after download completes
-3. **Start Camera**: Click the START button above the video feed
-4. **View Results**: See real-time detections with oriented bounding boxes
-
-### Features:
-- **Automatic Download**: Downloads model from Google Drive automatically
-- **Real-time Detection**: Live camera feed with YOLO inference
-- **Performance Optimization**: Process every Nth frame to improve speed
-- **Oriented Bounding Boxes**: Full OBB support for rotated objects
-- **GPU Acceleration**: Automatic CUDA detection and usage
-- **Customizable Settings**: Adjust confidence and processing rate
-- **Live Statistics**: Real-time FPS and detection information
-
-### Model Information:
-- **Source**: Google Drive (automatic download)
-- **Type**: YOLOv11m-OBB (Oriented Bounding Boxes)
-- **Application**: Waste detection
-- **Size**: ~40-60 MB (approximate)
-
-### Tips for Better Performance:
-- **GPU Usage**: Enable CUDA if available for faster inference
-- **Frame Skipping**: Increase frame skip (2-3) for better performance
-- **Confidence**: Lower threshold = more detections, higher threshold = fewer false positives
-- **Resolution**: Lower camera resolution improves processing speed
-
-### Troubleshooting:
-- **Download Issues**: Check internet connection and try again
-- **Loading Errors**: Ensure the model file downloaded completely
-- **Camera Issues**: Allow camera permissions in your browser
-- **Performance**: Try increasing frame skip or using CPU if GPU has issues
-""")
 
 # Requirements notice
 with st.expander("📦 Dependencies"):
