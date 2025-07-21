@@ -266,7 +266,11 @@ with col2:
 
 # WebRTC Configuration
 RTC_CONFIGURATION = RTCConfiguration({
-    "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+    "iceServers": [
+        {"urls": ["stun:stun.l.google.com:19302"]},
+        {"urls": ["stun:stun1.l.google.com:19302"]},
+        {"urls": ["stun:stun2.l.google.com:19302"]}
+    ]
 })
 
 class YOLOProcessor:
@@ -276,25 +280,26 @@ class YOLOProcessor:
         self.fps_counter = 0
         
     def recv(self, frame):
-        # Convert frame to numpy array
-        img = frame.to_ndarray(format="bgr24")
-        
-        # Update frame counter
-        self.frame_count += 1
-        
-        # Process only every Nth frame
-        if self.frame_count % process_every_n_frames != 0:
-            return av.VideoFrame.from_ndarray(img, format="bgr24")
-        
-        # Check if model is loaded
-        if st.session_state.model is None:
-            cv2.putText(img, "No Model Loaded", (50, 50), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            cv2.putText(img, "Download & Load Model First", (50, 100), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            return av.VideoFrame.from_ndarray(img, format="bgr24")
-        
         try:
+            # Convert frame to numpy array
+            img = frame.to_ndarray(format="bgr24")
+            print(f"Frame received: {img.shape}")  # Debug
+            
+            # Update frame counter
+            self.frame_count += 1
+            
+            # Process only every Nth frame
+            if self.frame_count % process_every_n_frames != 0:
+                return av.VideoFrame.from_ndarray(img, format="bgr24")
+            
+            # Check if model is loaded
+            if st.session_state.model is None:
+                cv2.putText(img, "No Model Loaded", (50, 50), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                cv2.putText(img, "Download & Load Model First", (50, 100), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                return av.VideoFrame.from_ndarray(img, format="bgr24")
+            
             # Run YOLO inference
             results = st.session_state.model(
                 img, 
@@ -325,8 +330,10 @@ class YOLOProcessor:
                 self.fps_counter = 0
                 self.last_fps_time = current_time
             
+            print(f"Detections: {len(st.session_state.detections)}")  # Debug
             return av.VideoFrame.from_ndarray(annotated_frame, format="bgr24")
         except Exception as e:
+            print(f"YOLOProcessor error: {str(e)}")  # Debug
             cv2.putText(img, f"Error: {str(e)[:50]}", (50, 50), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             return av.VideoFrame.from_ndarray(img, format="bgr24")
@@ -347,9 +354,9 @@ if st.session_state.model is not None:
             video_processor_factory=YOLOProcessor,
             media_stream_constraints={
                 "video": {
-                    "width": {"min": 320, "ideal": 640, "max": 1280},
-                    "height": {"min": 240, "ideal": 480, "max": 720},
-                    "frameRate": {"ideal": 30, "max": 60}
+                    "width": {"min": 320, "ideal": 320, "max": 640},
+                    "height": {"min": 240, "ideal": 240, "max": 480},
+                    "frameRate": {"ideal": 15, "max": 30}
                 },
                 "audio": False
             },
@@ -412,3 +419,11 @@ else:
     st.info("👈 Use the sidebar to download and load the model")
 
 
+
+# Footer
+st.markdown("---")
+st.markdown(
+    f"Made with ❤️ using Streamlit and YOLOv11m-OBB | "
+    f"Current Device: {'🚀 GPU' if torch.cuda.is_available() else '💻 CPU'} | "
+    f"Model Status: {'✅ Loaded' if st.session_state.model else '⚠️ Not Loaded'}"
+)
