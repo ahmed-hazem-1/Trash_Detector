@@ -311,6 +311,7 @@ class YOLOProcessor:
             
             # Draw detections (oriented bounding boxes)
             annotated_frame = results[0].plot()
+            print(f"Frame processed: {annotated_frame.shape}")  # Debug
             
             # Update detection info
             if len(results[0].boxes) > 0:
@@ -362,6 +363,10 @@ if st.session_state.model is not None:
             },
             async_processing=True,
         )
+        if webrtc_ctx.state.playing:
+            st.write("WebRTC is active")
+        else:
+            st.write("WebRTC is not active")
         
         # Camera controls
         st.markdown("### 🎮 Controls")
@@ -417,7 +422,6 @@ if st.session_state.model is not None:
 else:
     st.error("❌ Model not loaded")
     st.info("👈 Use the sidebar to download and load the model")
-
 
 
 # Footer
