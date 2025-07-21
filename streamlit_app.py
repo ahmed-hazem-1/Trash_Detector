@@ -11,6 +11,9 @@ from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 import av
 import threading
 import queue
+import requests
+import gdown
+from pathlib import Path
 
 # Page configuration
 st.set_page_config(
@@ -49,8 +52,19 @@ st.markdown("""
         padding: 0.5rem 1rem;
         border-radius: 10px;
     }
+    .download-progress {
+        background: #f0f2f6;
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 1rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
+
+# Model configuration
+MODEL_DRIVE_URL = "https://drive.google.com/file/d/1eP2sxQtSBb3nAC7kfwT8rQiYu0NLjFDm/view?usp=drive_link"
+MODEL_FILENAME = "best_waste_detection_model.pt"
+MODELS_DIR = Path("./models")
 
 # Initialize session state
 if 'model' not in st.session_state:
@@ -65,6 +79,122 @@ if 'last_fps_time' not in st.session_state:
     st.session_state.last_fps_time = time.time()
 if 'detections' not in st.session_state:
     st.session_state.detections = []
+if 'model_downloaded' not in st.session_state:
+    st.session_state.model_downloaded = False
+if 'download_progress' not in st.session_state:
+    st.session_state.download_progress = 0
+
+def extract_file_id_from_drive_url(url):
+    """Extract file ID from Google Drive URL"""
+    if 'drive.google.com' in url:
+        if '/file/d/' in url:
+            return url.split('/file/d/')[1].split('/')[0]
+        elif 'id=' in url:
+            return url.split('id=')[1].split('&')[0]
+    return None
+
+def download_model_from_drive():
+    """Download model from Google Drive using gdown"""
+    try:
+        # Create models directory if it doesn't exist
+        MODELS_DIR.mkdir(exist_ok=True)
+        model_path = MODELS_DIR / MODEL_FILENAME
+        
+        # Check if model already exists
+        if model_path.exists():
+            st.info(f"✅ Model already exists at {model_path}")
+            return str(model_path)
+        
+        # Extract file ID from Google Drive URL
+        file_id = extract_file_id_from_drive_url(MODEL_DRIVE_URL)
+        if not file_id:
+            st.error("❌ Could not extract file ID from Google Drive URL")
+            return None
+        
+        # Download using gdown
+        st.info("📥 Downloading model from Google Drive...")
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        # Use gdown to download
+        download_url = f"https://drive.google.com/uc?id={file_id}"
+        
+        try:
+            # Download with progress
+            output_path = gdown.download(download_url, str(model_path), quiet=False)
+            
+            if output_path and os.path.exists(output_path):
+                progress_bar.progress(100)
+                status_text.success("✅ Model downloaded successfully!")
+                st.session_state.model_downloaded = True
+                return str(model_path)
+            else:
+                st.error("❌ Failed to download model")
+                return None
+                
+        except Exception as e:
+            st.error(f"❌ Error downloading model: {str(e)}")
+            # Try alternative method
+            return download_model_requests_fallback(file_id, model_path)
+            
+    except Exception as e:
+        st.error(f"❌ Error in download process: {str(e)}")
+        return None
+
+def download_model_requests_fallback(file_id, model_path):
+    """Fallback method using requests (for smaller files)"""
+    try:
+        st.info("🔄 Trying alternative download method...")
+        
+        # Direct download URL for Google Drive
+        download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+        
+        response = requests.get(download_url, stream=True)
+        
+        if response.status_code == 200:
+            total_size = int(response.headers.get('content-length', 0))
+            
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            with open(model_path, 'wb') as f:
+                downloaded = 0
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0:
+                            progress = int((downloaded / total_size) * 100)
+                            progress_bar.progress(progress)
+                            status_text.text(f"Downloaded: {downloaded / (1024*1024):.1f}MB / {total_size / (1024*1024):.1f}MB")
+            
+            progress_bar.progress(100)
+            status_text.success("✅ Model downloaded successfully!")
+            st.session_state.model_downloaded = True
+            return str(model_path)
+        else:
+            st.error(f"❌ HTTP Error: {response.status_code}")
+            return None
+            
+    except Exception as e:
+        st.error(f"❌ Fallback download failed: {str(e)}")
+        return None
+
+def load_model_from_path(model_path):
+    """Load YOLO model from path"""
+    try:
+        if not os.path.exists(model_path):
+            st.error(f"❌ Model file not found: {model_path}")
+            return None
+            
+        with st.spinner("🔄 Loading YOLO model..."):
+            model = YOLO(model_path)
+            st.success("✅ Model loaded successfully!")
+            return model
+            
+    except Exception as e:
+        st.error(f"❌ Error loading model: {str(e)}")
+        return None
 
 # Header
 st.markdown('<h1 class="main-header">🎯 YOLOv11m-OBB Real-Time Detection</h1>', unsafe_allow_html=True)
@@ -73,43 +203,57 @@ st.markdown('<h1 class="main-header">🎯 YOLOv11m-OBB Real-Time Detection</h1>'
 with st.sidebar:
     st.header("⚙️ Configuration")
     
-    # Model upload section
+    # Model download section
     st.subheader("🤖 Model Setup")
+    
+    # Show model status
+    model_path = MODELS_DIR / MODEL_FILENAME
+    if model_path.exists():
+        st.success("✅ Model file found locally")
+        model_size_mb = model_path.stat().st_size / (1024 * 1024)
+        st.info(f"📁 Size: {model_size_mb:.1f} MB")
+    else:
+        st.warning("⚠️ Model not found locally")
+    
+    # Download and load model button
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("📥 Download Model"):
+            downloaded_path = download_model_from_drive()
+            if downloaded_path:
+                st.session_state.model_downloaded = True
+    
+    with col2:
+        if st.button("🔄 Load Model"):
+            if model_path.exists():
+                st.session_state.model = load_model_from_path(str(model_path))
+            else:
+                st.error("❌ Please download the model first")
+    
+    # Alternative upload option
+    st.subheader("📁 Alternative Upload")
     model_file = st.file_uploader(
-        "Upload your YOLOv11m-OBB model (.pt file)",
+        "Upload your own model (.pt file)",
         type=['pt'],
-        help="Upload your trained YOLOv11m-OBB model file"
+        help="Upload a custom YOLOv11m-OBB model file"
     )
     
-    # Model path input as alternative
-    model_path = st.text_input(
-        "Or enter model path:",
-        value="/content/drive/MyDrive/best_waste_detection_model.pt",
-        help="Enter the path to your model file"
-    )
-    
-    # Load model button
-    if st.button("🔄 Load Model"):
-        with st.spinner("Loading model..."):
+    if model_file is not None and st.button("Upload & Load"):
+        with st.spinner("Loading uploaded model..."):
             try:
-                if model_file is not None:
-                    # Save uploaded file temporarily
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.pt') as tmp_file:
-                        tmp_file.write(model_file.read())
-                        temp_path = tmp_file.name
-                    
-                    st.session_state.model = YOLO(temp_path)
-                    os.unlink(temp_path)  # Clean up temp file
-                    st.success("✅ Model loaded from uploaded file!")
-                    
-                elif model_path and os.path.exists(model_path):
-                    st.session_state.model = YOLO(model_path)
-                    st.success("✅ Model loaded from path!")
-                else:
-                    st.error("❌ Please upload a model file or provide a valid path")
-                    
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pt') as tmp_file:
+                    tmp_file.write(model_file.read())
+                    temp_path = tmp_file.name
+                
+                st.session_state.model = YOLO(temp_path)
+                os.unlink(temp_path)
+                st.success("✅ Uploaded model loaded!")
+                
             except Exception as e:
-                st.error(f"❌ Error loading model: {str(e)}")
+                st.error(f"❌ Error loading uploaded model: {str(e)}")
+    
+    st.divider()
     
     # Detection settings
     st.subheader("🎛️ Detection Settings")
@@ -126,7 +270,7 @@ with st.sidebar:
     process_every_n_frames = st.selectbox(
         "Process Every N Frames",
         options=[1, 2, 3, 4, 5],
-        index=1,  # Default to every 2nd frame
+        index=1,
         help="Process every Nth frame to improve performance"
     )
     
@@ -145,28 +289,40 @@ with st.sidebar:
         index=0,
         help="Select processing device"
     )
+    
+    # Model info section
+    if st.session_state.model is not None:
+        st.divider()
+        st.subheader("📊 Model Information")
+        
+        with st.expander("View Details"):
+            try:
+                st.write(f"**Model Type:** {type(st.session_state.model).__name__}")
+                st.write(f"**Classes:** {list(st.session_state.model.names.values())}")
+                st.write(f"**Number of Classes:** {len(st.session_state.model.names)}")
+                
+                # Device info
+                try:
+                    model_device = next(st.session_state.model.model.parameters()).device
+                    st.write(f"**Model Device:** {model_device}")
+                except:
+                    st.write("**Model Device:** Not available")
+                    
+            except Exception as e:
+                st.error(f"Error getting model info: {str(e)}")
 
-# Model status
+# Model status in main area
 col1, col2 = st.columns([3, 1])
 
 with col1:
     if st.session_state.model is not None:
-        st.success("✅ Model loaded and ready!")
-        
-        # Model info
-        with st.expander("📊 Model Information"):
-            st.write(f"**Model Type:** {type(st.session_state.model).__name__}")
-            st.write(f"**Classes:** {list(st.session_state.model.names.values())}")
-            st.write(f"**Number of Classes:** {len(st.session_state.model.names)}")
-            
-            # Device info
-            try:
-                model_device = next(st.session_state.model.model.parameters()).device
-                st.write(f"**Model Device:** {model_device}")
-            except:
-                st.write("**Model Device:** Not available")
+        st.success("✅ Model loaded and ready for detection!")
     else:
-        st.warning("⚠️ Please load a model first")
+        st.warning("⚠️ Model not loaded")
+        if not model_path.exists():
+            st.info("💡 Click 'Download Model' in the sidebar to get started")
+        else:
+            st.info("💡 Click 'Load Model' in the sidebar to load the downloaded model")
 
 with col2:
     if show_fps:
@@ -196,9 +352,10 @@ class YOLOProcessor:
         
         # Check if model is loaded
         if st.session_state.model is None:
-            # Draw "No Model" text on frame
             cv2.putText(img, "No Model Loaded", (50, 50), 
                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            cv2.putText(img, "Download & Load Model First", (50, 100), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             return av.VideoFrame.from_ndarray(img, format="bgr24")
         
         try:
@@ -234,7 +391,6 @@ class YOLOProcessor:
             return av.VideoFrame.from_ndarray(annotated_frame, format="bgr24")
             
         except Exception as e:
-            # Draw error on frame
             cv2.putText(img, f"Error: {str(e)[:50]}", (50, 50), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             return av.VideoFrame.from_ndarray(img, format="bgr24")
@@ -290,7 +446,7 @@ if st.session_state.model is not None:
         if show_detection_info and st.session_state.detections:
             st.markdown('<div class="detection-stats">', unsafe_allow_html=True)
             st.markdown("**Live Detections:**")
-            for detection in st.session_state.detections[:5]:  # Show top 5
+            for detection in st.session_state.detections[:5]:
                 st.markdown(f"• {detection}")
             if len(st.session_state.detections) > 5:
                 st.markdown(f"• ... and {len(st.session_state.detections) - 5} more")
@@ -306,30 +462,35 @@ if st.session_state.model is not None:
         st.metric("Frame Skip", f"Every {process_every_n_frames} frames")
         st.metric("Confidence", f"{confidence_threshold:.2f}")
         
-        # Device info
+        # System info
+        st.markdown("### 🔧 System Info")
         if torch.cuda.is_available():
-            st.markdown("### 🔧 System Info")
             st.success("✅ CUDA Available")
             st.info(f"GPU: {torch.cuda.get_device_name()}")
         else:
             st.warning("⚠️ CPU Only")
+        
+        # Model file info
+        if model_path.exists():
+            model_size = model_path.stat().st_size / (1024 * 1024)
+            st.info(f"📁 Model Size: {model_size:.1f} MB")
 
 else:
-    st.error("❌ Please load a model first using the sidebar")
-    st.info("👈 Use the sidebar to upload your YOLOv11m-OBB model file")
+    st.error("❌ Model not loaded")
+    st.info("👈 Use the sidebar to download and load the model")
 
 # Instructions
-with st.expander("📖 Instructions"):
+with st.expander("📖 Instructions & Setup"):
     st.markdown("""
-    ### How to Use:
+    ### Quick Start:
     
-    1. **Load Model**: Upload your `.pt` file or enter the model path in the sidebar
-    2. **Adjust Settings**: Configure confidence threshold and frame processing rate
+    1. **Download Model**: Click "📥 Download Model" in the sidebar
+    2. **Load Model**: Click "🔄 Load Model" after download completes
     3. **Start Camera**: Click the START button above the video feed
     4. **View Results**: See real-time detections with oriented bounding boxes
-    5. **Monitor Performance**: Check FPS and detection statistics
     
     ### Features:
+    - **Automatic Download**: Downloads model from Google Drive automatically
     - **Real-time Detection**: Live camera feed with YOLO inference
     - **Performance Optimization**: Process every Nth frame to improve speed
     - **Oriented Bounding Boxes**: Full OBB support for rotated objects
@@ -337,15 +498,52 @@ with st.expander("📖 Instructions"):
     - **Customizable Settings**: Adjust confidence and processing rate
     - **Live Statistics**: Real-time FPS and detection information
     
-    ### Tips:
-    - Lower confidence threshold = more detections (but more false positives)
-    - Higher frame skip = better performance (but less smooth detection)
-    - Use GPU for better performance with larger models
+    ### Model Information:
+    - **Source**: Google Drive (automatic download)
+    - **Type**: YOLOv11m-OBB (Oriented Bounding Boxes)
+    - **Application**: Waste detection
+    - **Size**: ~40-60 MB (approximate)
+    
+    ### Tips for Better Performance:
+    - **GPU Usage**: Enable CUDA if available for faster inference
+    - **Frame Skipping**: Increase frame skip (2-3) for better performance
+    - **Confidence**: Lower threshold = more detections, higher threshold = fewer false positives
+    - **Resolution**: Lower camera resolution improves processing speed
+    
+    ### Troubleshooting:
+    - **Download Issues**: Check internet connection and try again
+    - **Loading Errors**: Ensure the model file downloaded completely
+    - **Camera Issues**: Allow camera permissions in your browser
+    - **Performance**: Try increasing frame skip or using CPU if GPU has issues
+    """)
+
+# Requirements notice
+with st.expander("📦 Dependencies"):
+    st.markdown("""
+    ### Required Python Packages:
+    ```bash
+    pip install streamlit
+    pip install ultralytics
+    pip install opencv-python
+    pip install torch torchvision
+    pip install streamlit-webrtc
+    pip install gdown
+    pip install requests
+    pip install pillow
+    pip install numpy
+    ```
+    
+    ### Additional Notes:
+    - **gdown**: Used for downloading from Google Drive
+    - **torch**: GPU support requires CUDA-compatible version
+    - **streamlit-webrtc**: Handles real-time camera streaming
+    - **ultralytics**: YOLOv11 implementation
     """)
 
 # Footer
 st.markdown("---")
 st.markdown(
     "Made with ❤️ using Streamlit and YOLOv11m-OBB | "
-    f"Current Device: {'🚀 GPU' if torch.cuda.is_available() else '💻 CPU'}"
+    f"Current Device: {'🚀 GPU' if torch.cuda.is_available() else '💻 CPU'} | "
+    f"Model Status: {'✅ Loaded' if st.session_state.model else '⚠️ Not Loaded'}"
 )
