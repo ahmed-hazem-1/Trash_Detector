@@ -412,17 +412,3 @@ else:
     st.info("👈 Use the sidebar to download and load the model")
 
 
-# Requirements notice
-with st.expander("📦 Dependencies"):
-    st.markdown("""
-### Required Python Packages:
-```bash
-pip install streamlit==1.38.0
-pip install ultralytics==8.3.15
-pip install opencv-python-headless==4.10.0.84
-pip install torch==2.6.0
-pip install streamlit-webrtc==0.47.7
-pip install gdown==5.2.0
-pip install requests
-pip install pillow
-pip install numpy
