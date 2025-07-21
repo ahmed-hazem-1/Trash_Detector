@@ -262,7 +262,7 @@ with col1:
 
 with col2:
     if show_fps:
-        st.markdown(f'<div class="fps-counter">FPS: {st.session_state.fps:.1 1f}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="fps-counter">FPS: {st.session_state.fps:.1f}</div>', unsafe_allow_html=True)
 
 # WebRTC Configuration
 RTC_CONFIGURATION = RTCConfiguration({
