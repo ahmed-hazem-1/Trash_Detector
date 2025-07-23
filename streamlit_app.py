@@ -354,82 +354,85 @@ class YOLOProcessor:
 st.subheader("📹 Live Camera Feed")
 
 if st.session_state.model is not None:
-    # Create columns for camera and detection info
-    cam_col, info_col = st.columns([2, 1])
-    
-    with cam_col:
-        # WebRTC streamer
-        webrtc_ctx = webrtc_streamer(
-            key="yolo-detection",
-            mode=WebRtcMode.SENDRECV,
-            rtc_configuration=RTC_CONFIGURATION,
-            video_processor_factory=YOLOProcessor,
-            media_stream_constraints={
-                "video": {
-                    "width": {"min": 320, "ideal": 320, "max": 640},
-                    "height": {"min": 240, "ideal": 240, "max": 480},
-                    "frameRate": {"ideal": 15, "max": 30}
+    try:
+        # Create columns for camera and detection info
+        cam_col, info_col = st.columns([2, 1])
+        
+        with cam_col:
+            # WebRTC streamer with fallback
+            webrtc_ctx = webrtc_streamer(
+                key="yolo-detection",
+                mode=WebRtcMode.SENDRECV,
+                rtc_configuration=RTC_CONFIGURATION,
+                video_processor_factory=YOLOProcessor,
+                media_stream_constraints={
+                    "video": {
+                        "width": {"min": 320, "ideal": 320, "max": 640},
+                        "height": {"min": 240, "ideal": 240, "max": 480},
+                        "frameRate": {"ideal": 15, "max": 30}
+                    },
+                    "audio": False
                 },
-                "audio": False
-            },
-            async_processing=True,
-            on_error=lambda exc: st.error(f"WebRTC error: {str(exc)}"),  # Handle WebRTC errors
-        )
-        if webrtc_ctx.state.playing:
-            st.write("WebRTC is active")
-        else:
-            st.warning("⚠️ WebRTC not active. Check camera permissions or network connection.")
+                async_processing=True,
+                on_error=lambda exc: st.error(f"WebRTC error: {str(exc)}"),  # Handle WebRTC errors
+            )
+            if webrtc_ctx.state.playing:
+                st.write("WebRTC is active")
+            else:
+                st.warning("⚠️ WebRTC not active. Check camera permissions or network connection.")
+            
+            # Camera controls
+            st.markdown("### 🎮 Controls")
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                if st.button("▶️ Start Camera"):
+                    st.info("Click the 'START' button above the video feed")
+            
+            with col2:
+                if st.button("⏹️ Stop Camera"):
+                    st.info("Click the 'STOP' button above the video feed")
+            
+            with col3:
+                if st.button("🔄 Refresh"):
+                    st.rerun()
         
-        # Camera controls
-        st.markdown("### 🎮 Controls")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if st.button("▶️ Start Camera"):
-                st.info("Click the 'START' button above the video feed")
-        
-        with col2:
-            if st.button("⏹️ Stop Camera"):
-                st.info("Click the 'STOP' button above the video feed")
-        
-        with col3:
-            if st.button("🔄 Refresh"):
-                st.rerun()
-    
-    with info_col:
-        # Detection information panel
-        st.markdown("### 📊 Detection Stats")
-        
-        if show_detection_info and st.session_state.detections:
-            st.markdown('<div class="detection-stats">', unsafe_allow_html=True)
-            st.markdown("**Live Detections:**")
-            for detection in st.session_state.detections[:5]:
-                st.markdown(f"• {detection}")
-            if len(st.session_state.detections) > 5:
-                st.markdown(f"• ... and {len(st.session_state.detections) - 5} more")
-            st.markdown('</div>', unsafe_allow_html=True)
-        elif show_detection_info:
-            st.info("No detections")
-        
-        # Performance metrics
-        st.markdown("### ⚡ Performance")
-        if show_fps:
-            st.metric("FPS", f"{st.session_state.fps:.1f}")
-        
-        st.metric("Frame Skip", f"Every {process_every_n_frames} frames")
-        st.metric("Confidence", f"{confidence_threshold:.2f}")
-        
-        # System info
-        st.markdown("### 🔧 System Info")
-        if torch.cuda.is_available():
-            st.success("✅ CUDA Available")
-            st.info(f"GPU: {torch.cuda.get_device_name()}")
-        else:
-            st.warning("⚠️ CPU Only")
-        
-        if model_path.exists():
-            model_size = model_path.stat().st_size / (1024 * 1024)
-            st.info(f"📁 Model Size: {model_size:.1f} MB")
+        with info_col:
+            # Detection information panel
+            st.markdown("### 📊 Detection Stats")
+            
+            if show_detection_info and st.session_state.detections:
+                st.markdown('<div class="detection-stats">', unsafe_allow_html=True)
+                st.markdown("**Live Detections:**")
+                for detection in st.session_state.detections[:5]:
+                    st.markdown(f"• {detection}")
+                if len(st.session_state.detections) > 5:
+                    st.markdown(f"• ... and {len(st.session_state.detections) - 5} more")
+                st.markdown('</div>', unsafe_allow_html=True)
+            elif show_detection_info:
+                st.info("No detections")
+            
+            # Performance metrics
+            st.markdown("### ⚡ Performance")
+            if show_fps:
+                st.metric("FPS", f"{st.session_state.fps:.1f}")
+            
+            st.metric("Frame Skip", f"Every {process_every_n_frames} frames")
+            st.metric("Confidence", f"{confidence_threshold:.2f}")
+            
+            # System info
+            st.markdown("### 🔧 System Info")
+            if torch.cuda.is_available():
+                st.success("✅ CUDA Available")
+                st.info(f"GPU: {torch.cuda.get_device_name()}")
+            else:
+                st.warning("⚠️ CPU Only")
+            
+            if model_path.exists():
+                model_size = model_path.stat().st_size / (1024 * 1024)
+                st.info(f"📁 Model Size: {model_size:.1f} MB")
+    except Exception as e:
+        st.error(f"❌ Camera feed initialization failed: {str(e)}")
 else:
     st.error("❌ Model not loaded")
     st.info("👈 Use the sidebar to download and load the model")
