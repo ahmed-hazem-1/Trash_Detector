@@ -128,6 +128,11 @@ def load_model_from_path(model_path):
             return None
         with st.spinner("🔄 Loading YOLO model..."):
             model = YOLO(model_path)
+            try:
+                model.to('cuda')
+            except:
+                st.warning("⚠️ CUDA not available, falling back to CPU")
+                model.to('cpu')
             st.success("✅ Model loaded successfully!")
             return model
     except Exception as e:
@@ -269,7 +274,8 @@ RTC_CONFIGURATION = RTCConfiguration({
     "iceServers": [
         {"urls": ["stun:stun.l.google.com:19302"]},
         {"urls": ["stun:stun1.l.google.com:19302"]},
-        {"urls": ["stun:stun2.l.google.com:19302"]}
+        {"urls": ["stun:stun2.l.google.com:19302"]},
+        {"urls": ["stun:stun.services.mozilla.com"]}
     ]
 })
 
@@ -304,7 +310,7 @@ class YOLOProcessor:
             results = st.session_state.model(
                 img, 
                 conf=confidence_threshold, 
-                imgsz=256,  # Match training size
+                imgsz=256, 
                 device=selected_device if selected_device != 'auto' else None,
                 verbose=False
             )
@@ -339,7 +345,7 @@ class YOLOProcessor:
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             return av.VideoFrame.from_ndarray(img, format="bgr24")
 
-# Main camera interface
+# Main interface
 st.subheader("📹 Live Camera Feed")
 
 if st.session_state.model is not None:
@@ -366,7 +372,7 @@ if st.session_state.model is not None:
         if webrtc_ctx.state.playing:
             st.write("WebRTC is active")
         else:
-            st.write("WebRTC is not active")
+            st.error("⚠️ Camera feed not active. Ensure camera permissions are granted and try refreshing.")
         
         # Camera controls
         st.markdown("### 🎮 Controls")
@@ -418,11 +424,161 @@ if st.session_state.model is not None:
         if model_path.exists():
             model_size = model_path.stat().st_size / (1024 * 1024)
             st.info(f"📁 Model Size: {model_size:.1f} MB")
-
 else:
     st.error("❌ Model not loaded")
     st.info("👈 Use the sidebar to download and load the model")
 
+# New section for image/video upload
+st.subheader("📁 Upload Image or Video for Detection")
+
+if st.session_state.model is not None:
+    uploaded_file = st.file_uploader(
+        "Upload an image or video",
+        type=['jpg', 'jpeg', 'png', 'mp4', 'avi'],
+        help="Upload an image (.jpg, .png) or video (.mp4, .avi) for YOLO detection"
+    )
+    
+    if uploaded_file is not None:
+        file_extension = uploaded_file.name.split('.')[-1].lower()
+        with st.spinner("Processing uploaded file..."):
+            try:
+                # Handle image
+                if file_extension in ['jpg', 'jpeg', 'png']:
+                    # Read and process image
+                    img = Image.open(uploaded_file)
+                    img_array = np.array(img)
+                    if len(img_array.shape) == 2:  # Convert grayscale to RGB
+                        img_array = cv2.cvtColor(img_array, cv2.COLOR_GRAY2BGR)
+                    elif img_array.shape[2] == 4:  # Convert RGBA to RGB
+                        img_array = cv2.cvtColor(img_array, cv2.COLOR_RGBA2BGR)
+                    
+                    # Run YOLO inference
+                    results = st.session_state.model(
+                        img_array,
+                        conf=confidence_threshold,
+                        imgsz=256,
+                        device=selected_device if selected_device != 'auto' else None,
+                        verbose=False
+                    )
+                    
+                    # Draw detections
+                    annotated_frame = results[0].plot()
+                    annotated_img = Image.fromarray(cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB))
+                    
+                    # Display results
+                    st.image(annotated_img, caption="Detected Image", use_column_width=True)
+                    
+                    # Update detection info
+                    detections = []
+                    if len(results[0].boxes) > 0:
+                        for conf, cls in zip(results[0].boxes.conf, results[0].boxes.cls):
+                            class_name = st.session_state.model.names[int(cls)]
+                            detections.append(f"{class_name}: {conf:.2f}")
+                    
+                    if detections:
+                        st.markdown('<div class="detection-stats">', unsafe_allow_html=True)
+                        st.markdown("**Image Detections:**")
+                        for detection in detections[:5]:
+                            st.markdown(f"• {detection}")
+                        if len(detections) > 5:
+                            st.markdown(f"• ... and {len(detections) - 5} more")
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    else:
+                        st.info("No detections in the image")
+                
+                # Handle video
+                elif file_extension in ['mp4', 'avi']:
+                    # Save uploaded video to temporary file
+                    tfile = tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_extension}')
+                    tfile.write(uploaded_file.read())
+                    tfile.close()
+                    
+                    # Open video
+                    cap = cv2.VideoCapture(tfile.name)
+                    if not cap.isOpened():
+                        st.error("❌ Could not open video file")
+                        os.unlink(tfile.name)
+                        return
+                    
+                    # Get video properties
+                    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    fps = int(cap.get(cv2.CAP_PROP_FPS))
+                    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                    
+                    # Create output video
+                    output_path = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
+                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                    out = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
+                    
+                    # Process video frames
+                    frame_count = 0
+                    progress_bar = st.progress(0)
+                    detections = []
+                    
+                    while cap.isOpened():
+                        ret, frame = cap.read()
+                        if not ret:
+                            break
+                        
+                        frame_count += 1
+                        progress_bar.progress(min(frame_count / total_frames, 1.0))
+                        
+                        # Process only every Nth frame
+                        if frame_count % process_every_n_frames == 0:
+                            # Run YOLO inference
+                            results = st.session_state.model(
+                                frame,
+                                conf=confidence_threshold,
+                                imgsz=256,
+                                device=selected_device if selected_device != 'auto' else None,
+                                verbose=False
+                            )
+                            
+                            # Draw detections
+                            annotated_frame = results[0].plot()
+                            
+                            # Collect detections
+                            if len(results[0].boxes) > 0:
+                                for conf, cls in zip(results[0].boxes.conf, results[0].boxes.cls):
+                                    class_name = st.session_state.model.names[int(cls)]
+                                    detections.append(f"{class_name}: {conf:.2f}")
+                            
+                            out.write(annotated_frame)
+                        else:
+                            out.write(frame)
+                    
+                    cap.release()
+                    out.release()
+                    os.unlink(tfile.name)
+                    
+                    # Display output video
+                    st.video(output_path)
+                    
+                    # Display detections
+                    if detections:
+                        st.markdown('<div class="detection-stats">', unsafe_allow_html=True)
+                        st.markdown("**Video Detections (Sampled Frames):**")
+                        unique_detections = list(dict.fromkeys(detections))  # Remove duplicates
+                        for detection in unique_detections[:5]:
+                            st.markdown(f"• {detection}")
+                        if len(unique_detections) > 5:
+                            st.markdown(f"• ... and {len(unique_detections) - 5} more")
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    else:
+                        st.info("No detections in the video")
+                    
+                    # Clean up output file
+                    os.unlink(output_path)
+                
+                else:
+                    st.error("❌ Unsupported file format")
+            
+            except Exception as e:
+                st.error(f"❌ Error processing file: {str(e)}")
+else:
+    st.error("❌ Model not loaded")
+    st.info("👈 Use the sidebar to download and load the model")
 
 # Footer
 st.markdown("---")
