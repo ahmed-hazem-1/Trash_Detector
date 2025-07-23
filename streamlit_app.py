@@ -498,84 +498,85 @@ if st.session_state.model is not None:
                     if not cap.isOpened():
                         st.error("❌ Could not open video file")
                         os.unlink(tfile.name)
-                        return
-                    
-                    # Get video properties
-                    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                    fps = int(cap.get(cv2.CAP_PROP_FPS))
-                    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                    
-                    # Create output video
-                    output_path = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
-                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                    out = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
-                    
-                    # Process video frames
-                    frame_count = 0
-                    progress_bar = st.progress(0)
-                    detections = []
-                    
-                    while cap.isOpened():
-                        ret, frame = cap.read()
-                        if not ret:
-                            break
-                        
-                        frame_count += 1
-                        progress_bar.progress(min(frame_count / total_frames, 1.0))
-                        
-                        # Process only every Nth frame
-                        if frame_count % process_every_n_frames == 0:
-                            # Run YOLO inference
-                            results = st.session_state.model(
-                                frame,
-                                conf=confidence_threshold,
-                                imgsz=256,
-                                device=selected_device if selected_device != 'auto' else None,
-                                verbose=False
-                            )
-                            
-                            # Draw detections
-                            annotated_frame = results[0].plot()
-                            
-                            # Collect detections
-                            if len(results[0].boxes) > 0:
-                                for conf, cls in zip(results[0].boxes.conf, results[0].boxes.cls):
-                                    class_name = st.session_state.model.names[int(cls)]
-                                    detections.append(f"{class_name}: {conf:.2f}")
-                            
-                            out.write(annotated_frame)
-                        else:
-                            out.write(frame)
-                    
-                    cap.release()
-                    out.release()
-                    os.unlink(tfile.name)
-                    
-                    # Display output video
-                    st.video(output_path)
-                    
-                    # Display detections
-                    if detections:
-                        st.markdown('<div class="detection-stats">', unsafe_allow_html=True)
-                        st.markdown("**Video Detections (Sampled Frames):**")
-                        unique_detections = list(dict.fromkeys(detections))  # Remove duplicates
-                        for detection in unique_detections[:5]:
-                            st.markdown(f"• {detection}")
-                        if len(unique_detections) > 5:
-                            st.markdown(f"• ... and {len(unique_detections) - 5} more")
-                        st.markdown('</div>', unsafe_allow_html=True)
                     else:
-                        st.info("No detections in the video")
-                    
-                    # Clean up output file
-                    os.unlink(output_path)
+                        # Get video properties
+                        frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                        frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        fps = int(cap.get(cv2.CAP_PROP_FPS))
+                        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                        
+                        # Create output video
+                        output_path = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
+                        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                        out = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
+                        
+                        # Process video frames
+                        frame_count = 0
+                        progress_bar = st.progress(0)
+                        detections = []
+                        
+                        while cap.isOpened():
+                            ret, frame = cap.read()
+                            if not ret:
+                                break
+                            
+                            frame_count += 1
+                            progress_bar.progress(min(frame_count / total_frames, 1.0))
+                            
+                            # Process only every Nth frame
+                            if frame_count % process_every_n_frames == 0:
+                                # Run YOLO inference
+                                results = st.session_state.model(
+                                    frame,
+                                    conf=confidence_threshold,
+                                    imgsz=256,
+                                    device=selected_device if selected_device != 'auto' else None,
+                                    verbose=False
+                                )
+                                
+                                # Draw detections
+                                annotated_frame = results[0].plot()
+                                
+                                # Collect detections
+                                if len(results[0].boxes) > 0:
+                                    for conf, cls in zip(results[0].boxes.conf, results[0].boxes.cls):
+                                        class_name = st.session_state.model.names[int(cls)]
+                                        detections.append(f"{class_name}: {conf:.2f}")
+                                
+                                out.write(annotated_frame)
+                            else:
+                                out.write(frame)
+                        
+                        cap.release()
+                        out.release()
+                        os.unlink(tfile.name)
+                        
+                        # Display output video
+                        st.video(output_path)
+                        
+                        # Display detections
+                        if detections:
+                            st.markdown('<div class="detection-stats">', unsafe_allow_html=True)
+                            st.markdown("**Video Detections (Sampled Frames):**")
+                            unique_detections = list(dict.fromkeys(detections))  # Remove duplicates
+                            for detection in unique_detections[:5]:
+                                st.markdown(f"• {detection}")
+                            if len(unique_detections) > 5:
+                                st.markdown(f"• ... and {len(unique_detections) - 5} more")
+                            st.markdown('</div>', unsafe_allow_html=True)
+                        else:
+                            st.info("No detections in the video")
+                        
+                        # Clean up output file
+                        os.unlink(output_path)
                 
                 else:
                     st.error("❌ Unsupported file format")
             
             except Exception as e:
                 st.error(f"❌ Error processing file: {str(e)}")
+                if 'tfile' in locals():
+                    os.unlink(tfile.name)
 else:
     st.error("❌ Model not loaded")
     st.info("👈 Use the sidebar to download and load the model")
