@@ -355,7 +355,10 @@ st.subheader("📹 Live Camera Feed")
 
 if st.session_state.model is not None:
     try:
-        # WebRTC streamer with fallback
+        # WebRTC streamer with fallback and simplified STUN configuration
+        RTC_CONFIGURATION = RTCConfiguration({
+            "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]  # Use a single reliable STUN server
+        })
         webrtc_ctx = webrtc_streamer(
             key="yolo-detection",
             mode=WebRtcMode.SENDRECV,
@@ -374,7 +377,7 @@ if st.session_state.model is not None:
         if webrtc_ctx.state.playing:
             st.write("WebRTC is active")
         else:
-            st.warning("⚠️ WebRTC not active. Check camera permissions or network connection.")
+            st.warning("⚠️ WebRTC not active. Check camera permissions, network, or try a different browser.")
         
         # Camera controls
         st.markdown("### 🎮 Controls")
@@ -391,6 +394,8 @@ if st.session_state.model is not None:
         with col3:
             if st.button("🔄 Refresh"):
                 st.rerun()
+    except Exception as e:
+        st.error(f"❌ Camera feed initialization failed: {str(e)}")
         
         with info_col:
             # Detection information panel
