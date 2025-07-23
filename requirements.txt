@@ -1,8 +1,5 @@
 # Core ML and Computer Vision (Python 3.10+ compatible)
 # PyTorch with CUDA support - install manually if needed
-torch==2.5.1+cu118
-torchvision==0.20.1+cu118
-torchaudio==2.5.1+cu118
 
 # YOLO and Computer Vision - stable versions
 ultralytics==8.3.169
