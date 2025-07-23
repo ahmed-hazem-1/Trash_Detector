@@ -212,7 +212,7 @@ with st.sidebar:
     process_every_n_frames = st.selectbox(
         "Process Every N Frames",
         options=[1, 2, 3, 4, 5],
-        index=1,
+        index=2,  # Default to 3 to reduce resource usage
         help="Process every Nth frame to improve performance"
     )
     
@@ -300,6 +300,7 @@ class YOLOProcessor:
             
             # Check if model is loaded
             if st.session_state.model is None:
+                st.warning("⚠️ Model not loaded, using placeholder frame")
                 cv2.putText(img, "No Model Loaded", (50, 50), 
                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
                 cv2.putText(img, "Download & Load Model First", (50, 100), 
@@ -307,13 +308,17 @@ class YOLOProcessor:
                 return av.VideoFrame.from_ndarray(img, format="bgr24")
             
             # Run YOLO inference
-            results = st.session_state.model(
-                img, 
-                conf=confidence_threshold, 
-                imgsz=256, 
-                device=selected_device if selected_device != 'auto' else None,
-                verbose=False
-            )
+            try:
+                results = st.session_state.model(
+                    img, 
+                    conf=confidence_threshold, 
+                    imgsz=256,
+                    device=selected_device if selected_device != 'auto' else None,
+                    verbose=False
+                )
+            except Exception as e:
+                st.error(f"⚠️ YOLO inference error: {str(e)}")
+                return av.VideoFrame.from_ndarray(img, format="bgr24")
             
             # Draw detections (oriented bounding boxes)
             annotated_frame = results[0].plot()
@@ -368,11 +373,12 @@ if st.session_state.model is not None:
                 "audio": False
             },
             async_processing=True,
+            on_error=lambda exc: st.error(f"WebRTC error: {str(exc)}"),  # Handle WebRTC errors
         )
         if webrtc_ctx.state.playing:
             st.write("WebRTC is active")
         else:
-            st.error("⚠️ Camera feed not active. Ensure camera permissions are granted and try refreshing.")
+            st.warning("⚠️ WebRTC not active. Check camera permissions or network connection.")
         
         # Camera controls
         st.markdown("### 🎮 Controls")
