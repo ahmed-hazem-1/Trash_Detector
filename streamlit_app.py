@@ -8,8 +8,6 @@ import os
 import time
 from ultralytics import YOLO
 import gdown
-import av
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 
 # Page configuration
 st.set_page_config(page_title="YOLO Trash Detector", layout="centered")
@@ -20,17 +18,12 @@ if 'fps' not in st.session_state:
 if 'detections' not in st.session_state:
     st.session_state.detections = []
 
-# Check for CUDA availability
-if not torch.cuda.is_available():
-    st.error("CUDA device not available. This app requires a GPU.")
-    st.stop()
-
 # Create directory for models
 MODEL_DIR = "models"
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 # Title
-st.title("YOLO Trash Detector (CUDA Only)")
+st.title("YOLO Trash Detector (CPU)")
 
 # Function to extract file ID from Google Drive link
 def extract_file_id_from_drive_url(url):
@@ -73,17 +66,16 @@ elif drive_url:
 
 # Settings
 confidence = st.sidebar.slider("Confidence Threshold", 0.1, 1.0, 0.25, 0.05)
-frame_skip = st.sidebar.selectbox("Process Every Nth Frame", [1, 2, 3, 4, 5], index=2)
-show_fps = st.sidebar.checkbox("Show FPS Counter", value=True)
+frame_skip = st.sidebar.selectbox("Process Every Nth Frame (for video)", [1, 2, 3, 4, 5], index=2)
+show_fps = st.sidebar.checkbox("Show FPS Counter (for video)", value=True)
 
 # --- Load model ---
 model = None
 if model_path and os.path.exists(model_path):
     try:
         model = YOLO(model_path)
-        model.to("cuda")
-        st.sidebar.success("Model loaded on CUDA!")
-        # Store model in session state for later use
+        # No CUDA, runs on CPU by default
+        st.sidebar.success("Model loaded on CPU!")
         st.session_state.model = model
     except Exception as e:
         st.sidebar.error(f"Failed to load model: {e}")
@@ -92,7 +84,7 @@ else:
     st.session_state.model = None
 
 # --- Main: Mode selection ---
-mode = st.selectbox("Choose Detection Mode", ["Upload Image", "Upload Video", "Real-Time Camera"])
+mode = st.selectbox("Choose Detection Mode", ["Upload Image", "Upload Video"])  # Removed Real-Time Camera
 
 if model is None:
     st.warning("Please upload or download a model first.")
@@ -100,7 +92,7 @@ if model is None:
 
 # Inference function
 def run_inference(img):
-    results = model(img, conf=confidence, imgsz=256, device="cuda", verbose=False)
+    results = model(img, conf=confidence, imgsz=256, verbose=False)  # Removed device="cuda"
     annotated = results[0].plot()
     return annotated, results
 
@@ -180,9 +172,9 @@ elif mode == "Upload Video":
                         # Run detection
                         annotated, results = run_inference(frame)
                         
-                        # Log the detection details for debugging
-                        st.session_state.frame_being_processed = frame_count
-                        
+                        # Log the detection details
+                        st.session_state.frame_being_processed = frame:Stroke
+
                         # Check if there are any detections in this frame
                         boxes = getattr(results[0], 'boxes', None)
                         frame_has_detections = False
@@ -242,118 +234,7 @@ elif mode == "Upload Video":
             os.unlink(tfile.name)
             os.unlink(out_path)
 
-# --- Mode: Real-Time Camera ---
-elif mode == "Real-Time Camera":
-    # Video processor class for real-time detection
-    class YOLOProcessor:
-        def __init__(self):
-            self.frame_count = 0
-            self.fps = 0
-            self.frame_time = time.time()
-            self.frame_counter = 0
-            
-        def recv(self, frame):
-            img = frame.to_ndarray(format="bgr24")
-            self.frame_count += 1
-            
-            # FPS calculation
-            self.frame_counter += 1
-            if (time.time() - self.frame_time) > 1.0:
-                self.fps = self.frame_counter / (time.time() - self.frame_time)
-                self.frame_counter = 0
-                self.frame_time = time.time()
-                # Store FPS in session state for display elsewhere
-                st.session_state.fps = self.fps
-                
-            # Skip frames for performance
-            if self.frame_count % frame_skip != 0:
-                return av.VideoFrame.from_ndarray(img, format="bgr24")
-                
-            # Run detection
-            try:
-                annotated, results = run_inference(img)
-                
-                # Store detections in session state
-                detections = []
-                boxes = getattr(results[0], 'boxes', None)
-                if boxes is not None and hasattr(boxes, 'conf') and hasattr(boxes, 'cls'):
-                    for conf, cls in zip(boxes.conf, boxes.cls):
-                        class_name = model.names[int(cls)] if hasattr(model, "names") else str(cls)
-                        detections.append(f"{class_name}: {conf:.2f}")
-                st.session_state.detections = detections
-                
-                # Add FPS counter to frame
-                if show_fps:
-                    cv2.putText(annotated, f"FPS: {self.fps:.1f}", (10, 30), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                return av.VideoFrame.from_ndarray(annotated, format="bgr24")
-            except Exception as e:
-                print(f"Error in detection: {e}")
-                return av.VideoFrame.from_ndarray(img, format="bgr24")
-    
-    # WebRTC configuration for camera
-    rtc_config = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
-    
-    st.info("Click START below to activate the camera.")
-    
-    webrtc_ctx = webrtc_streamer(
-        key="yolo-detector",
-        mode=WebRtcMode.SENDRECV,
-        rtc_configuration=rtc_config,
-        video_processor_factory=YOLOProcessor,
-        media_stream_constraints={"video": True, "audio": False},
-        async_processing=True,
-    )
-    
-    # Display information about the stream
-    if webrtc_ctx.state.playing:
-        st.success("Camera active. Detection running...")
-        
-        # Show FPS if enabled
-        if show_fps:
-            st.metric("Current FPS", f"{st.session_state.fps:.1f}")
-        
-        # Show detections
-        if st.session_state.detections:
-            st.subheader("Live Detections")
-            for detection in st.session_state.detections[:5]:
-                st.write(f"• {detection}")
-            if len(st.session_state.detections) > 5:
-                st.write(f"• ... and {len(st.session_state.detections) - 5} more")
-    
-    st.markdown("""
-    ### Camera Notes:
-    - Allow camera access when prompted
-    - Processing runs on your GPU (CUDA)
-    - Higher confidence = fewer detections
-    - Higher frame skip = better performance
-    """)
-    # Model info section
-    if st.session_state.model is not None:
-        st.divider()
-        st.subheader("📊 Model Information")
-        
-        with st.expander("View Details"):
-            try:
-                st.write(f"**Model Type:** {type(st.session_state.model).__name__}")
-                # Safe check for model.names
-                model_names = getattr(st.session_state.model, "names", None)
-                if isinstance(model_names, dict):
-                    st.write(f"**Classes:** {list(model_names.values())}")
-                    st.write(f"**Number of Classes:** {len(model_names)}")
-                else:
-                    st.write("**Classes:** Not available")
-                    st.write("**Number of Classes:** Not available")
-                # Device info
-                try:
-                    model_device = next(st.session_state.model.model.parameters()).device
-                    st.write(f"**Model Device:** {model_device}")
-                except:
-                    st.write("**Model Device:** Not available")
-            except Exception as e:
-                st.error(f"Error getting model info: {str(e)}")
-
-# Model status in main area
+# --- Model Status ---
 col1, col2 = st.columns([3, 1])
 
 with col1:
@@ -361,22 +242,31 @@ with col1:
         st.success("✅ Model loaded and ready for detection!")
     else:
         st.warning("⚠️ Model not loaded")
-        if not model_path.exists():
-            st.info("💡 Click 'Download Model' in the sidebar to get started")
-        else:
-            st.info("💡 Click 'Load Model' in the sidebar to load the downloaded model")
+        if model_path is None or not os.path.exists(model_path):
+            st.info("💡 Upload a model or provide a Google Drive link in the sidebar.")
 
 with col2:
-    if show_fps:
+    if show_fps and mode == "Upload Video":
         st.markdown(f'<div class="fps-counter">FPS: {st.session_state.fps:.1f}</div>', unsafe_allow_html=True)
 
-# WebRTC Configuration
-RTC_CONFIGURATION = RTCConfiguration({
-    "iceServers": [
-        {"urls": ["stun:stun.l.google.com:19302"]},
-        {"urls": ["stun:stun1.l.google.com:19302"]},
-        {"urls": ["stun:stun2.l.google.com:19302"]},
-        {"urls": ["stun:stun.services.mozilla.com"]}
-    ]
-})
+# Note about Real-Time Camera
+st.info("Real-Time Camera mode is not supported on Streamlit Community Cloud due to WebRTC limitations. Use image or video upload modes instead.")
 
+# Model info section
+if st.session_state.model is not None:
+    st.divider()
+    st.subheader("📊 Model Information")
+    
+    with st.expander("View Details"):
+        try:
+            st.write(f"**Model Type:** {type(st.session_state.model).__name__}")
+            model_names = getattr(st.session_state.model, "names", None)
+            if isinstance(model_names, dict):
+                st.write(f"**Classes:** {list(model_names.values())}")
+                st.write(f"**Number of Classes:** {len(model_names)}")
+            else:
+                st.write("**Classes:** Not available")
+                st.write("**Number of Classes:** Not available")
+            st.write("**Model Device:** CPU")
+        except Exception as e:
+            st.error(f"Error getting model info: {str(e)}")
