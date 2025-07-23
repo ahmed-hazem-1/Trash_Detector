@@ -355,42 +355,42 @@ st.subheader("📹 Live Camera Feed")
 
 if st.session_state.model is not None:
     try:
-    # WebRTC streamer with fallback
-    webrtc_ctx = webrtc_streamer(
-        key="yolo-detection",
-        mode=WebRtcMode.SENDRECV,
-        rtc_configuration=RTC_CONFIGURATION,
-        video_processor_factory=YOLOProcessor,
-        media_stream_constraints={
-            "video": {
-                "width": {"min": 320, "ideal": 320, "max": 640},
-                "height": {"min": 240, "ideal": 240, "max": 480},
-                "frameRate": {"ideal": 15, "max": 30}
+        # WebRTC streamer with fallback
+        webrtc_ctx = webrtc_streamer(
+            key="yolo-detection",
+            mode=WebRtcMode.SENDRECV,
+            rtc_configuration=RTC_CONFIGURATION,
+            video_processor_factory=YOLOProcessor,
+            media_stream_constraints={
+                "video": {
+                    "width": {"min": 320, "ideal": 320, "max": 640},
+                    "height": {"min": 240, "ideal": 240, "max": 480},
+                    "frameRate": {"ideal": 15, "max": 30}
+                },
+                "audio": False
             },
-            "audio": False
-        },
-        async_processing=True,
-    )
-    if webrtc_ctx.state.playing:
-        st.write("WebRTC is active")
-    else:
-        st.warning("⚠️ WebRTC not active. Check camera permissions or network connection.")
-    
-    # Camera controls
-    st.markdown("### 🎮 Controls")
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("▶️ Start Camera"):
-            st.info("Click the 'START' button above the video feed")
-    
-    with col2:
-        if st.button("⏹️ Stop Camera"):
-            st.info("Click the 'STOP' button above the video feed")
-    
-    with col3:
-        if st.button("🔄 Refresh"):
-            st.rerun()
+            async_processing=True,
+        )
+        if webrtc_ctx.state.playing:
+            st.write("WebRTC is active")
+        else:
+            st.warning("⚠️ WebRTC not active. Check camera permissions or network connection.")
+        
+        # Camera controls
+        st.markdown("### 🎮 Controls")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("▶️ Start Camera"):
+                st.info("Click the 'START' button above the video feed")
+        
+        with col2:
+            if st.button("⏹️ Stop Camera"):
+                st.info("Click the 'STOP' button above the video feed")
+        
+        with col3:
+            if st.button("🔄 Refresh"):
+                st.rerun()
         
         with info_col:
             # Detection information panel
