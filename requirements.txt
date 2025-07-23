@@ -1,33 +1,39 @@
-# Core ML and Computer Vision
-# Note: Install PyTorch manually first with the local wheel file
-# torch==2.5.1+cu118  # Install manually from wheel
-# torchvision  # Install after torch
-# torchaudio   # Install after torch
+# Core ML and Computer Vision (Python 3.10+ compatible)
+# PyTorch with CUDA support - install manually if needed
+torch==2.5.1+cu118
+torchvision==0.20.1+cu118
+torchaudio==2.5.1+cu118
 
-# YOLO and Computer Vision - pinned for OBB compatibility
-ultralytics  # Updated version for better compatibility
+# YOLO and Computer Vision - stable versions
+ultralytics==8.3.169
 opencv-python==4.8.1.78
-numpy==1.24.3
-pillow==10.0.1
+numpy==1.26.4
+pillow==10.4.0
 
 # Web Framework and UI
 streamlit==1.28.1
-streamlit-webrtc==0.47.1
+streamlit-webrtc==0.63.3
 
 # Utilities
 gdown==4.7.1
-av==10.0.0
+av==14.4.0
 
 # Optional dependencies for better performance
-psutil
-GPUtil
+psutil==7.0.0
+GPUtil==1.4.0
 
-# Additional dependencies that might be needed
-scipy
-matplotlib
-pandas
+# Scientific computing and visualization
+scipy==1.15.3
+matplotlib==3.10.3
+pandas==2.3.1
 
-# Fallback dependencies for model loading issues
-torch-model-archiver  # For handling different model formats
-packaging  # For version parsing
-requests  # For alternative model downloads
+# Additional dependencies
+packaging==23.2
+requests==2.32.4
+PyYAML==6.0.2
+tqdm==4.67.1
+
+# Compatibility and utility packages
+typing_extensions==4.14.1
+charset-normalizer==3.4.2
+certifi==2025.7.14
