@@ -173,7 +173,7 @@ elif mode == "Upload Video":
                         annotated, results = run_inference(frame)
                         
                         # Log the detection details
-                        st.session_state.frame_being_processed = frame:Stroke
+                        st.session_state.frame_being_processed = frame_count
 
                         # Check if there are any detections in this frame
                         boxes = getattr(results[0], 'boxes', None)
