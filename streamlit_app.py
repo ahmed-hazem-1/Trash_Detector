@@ -77,22 +77,22 @@ else:
             st.sidebar.info("Downloading default model from Google Drive...")
             try:
                 gdown.download(f"https://drive.google.com/uc?id={file_id}", model_path, quiet=False)
-                st.sidebar.success("Default model downloaded successfully!")
+                if os.path.exists(model_path):
+                    st.sidebar.success("Default model downloaded successfully!")
+                else:
+                    st.sidebar.error("Download completed, but model file was not found.")
+                    model_path = None
             except Exception as e:
-                st.sidebar.error(f"Download failed: {e}")
+                st.sidebar.error(f"Default model download failed: {e}")
                 model_path = None
     else:
         st.sidebar.error("Invalid default Google Drive link.")
-
-# Settings
-confidence = st.sidebar.slider("Confidence Threshold", 0.1, 1.0, 0.25, 0.05)
-frame_skip = st.sidebar.selectbox("Process Every Nth Frame (for video)", [1, 2, 3, 4, 5], index=2)
-show_fps = st.sidebar.checkbox("Show FPS Counter (for video)", value=True)
 
 # --- Load model ---
 model = None
 if model_path and os.path.exists(model_path):
     try:
+        st.sidebar.info(f"Loading model from {model_path}...")
         model = YOLO(model_path)
         # No CUDA, runs on CPU by default
         st.sidebar.success("Model loaded on CPU!")
@@ -102,19 +102,24 @@ if model_path and os.path.exists(model_path):
         st.session_state.model = None
 else:
     st.session_state.model = None
+    st.sidebar.error(f"Model path is invalid or file does not exist: {model_path}")
 
 # --- Main: Mode selection ---
 mode = st.selectbox("Choose Detection Mode", ["Upload Image", "Upload Video"])  # Removed Real-Time Camera
 
 if model is None:
-    st.warning("Please upload or download a model first.")
+    st.warning("Model could not be loaded. Check the sidebar for error details.")
     st.stop()
 
 # Inference function
 def run_inference(img):
-    results = model(img, conf=confidence, imgsz=256, verbose=False)  # Removed device="cuda"
-    annotated = results[0].plot()
-    return annotated, results
+    try:
+        results = model(img, conf=confidence, imgsz=256, verbose=False)
+        annotated = results[0].plot()
+        return annotated, results
+    except Exception as e:
+        st.error(f"Inference failed: {e}")
+        return None, None
 
 # --- Mode: Upload Image ---
 if mode == "Upload Image":
@@ -132,17 +137,21 @@ if mode == "Upload Image":
         # Run detection
         with st.spinner("Detecting objects..."):
             annotated, results = run_inference(img_np)
-            st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), caption="Detection Result", use_column_width=True)
+            if annotated is not None:
+                st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), caption="Detection Result", use_column_width=True)
         
         # Display detections
         st.subheader("Detected Objects")
-        boxes = getattr(results[0], 'boxes', None)
-        if boxes is not None and hasattr(boxes, 'conf') and hasattr(boxes, 'cls'):
-            for conf, cls in zip(boxes.conf, boxes.cls):
-                class_name = model.names[int(cls)] if hasattr(model, "names") else str(cls)
-                st.write(f"{class_name}: {conf:.2f}")
+        if results and hasattr(results[0], 'boxes'):
+            boxes = results[0].boxes
+            if boxes is not None and hasattr(boxes, 'conf') and hasattr(boxes, 'cls'):
+                for conf, cls in zip(boxes.conf, boxes.cls):
+                    class_name = model.names[int(cls)] if hasattr(model, "names") else str(cls)
+                    st.write(f"{class_name}: {conf:.2f}")
+            else:
+                st.write("No objects detected.")
         else:
-            st.write("No objects detected.")
+            st.write("No objects detected or inference failed.")
 
 # --- Mode: Upload Video ---
 elif mode == "Upload Video":
@@ -191,6 +200,8 @@ elif mode == "Upload Video":
                     if frame_count % frame_skip == 0:
                         # Run detection
                         annotated, results = run_inference(frame)
+                        if annotated is None:
+                            continue
                         
                         # Log the detection details
                         st.session_state.frame_being_processed = frame_count
@@ -220,7 +231,7 @@ elif mode == "Upload Video":
                 
                 # Calculate processing time
                 processing_time = time.time() - start_time
-                fps_processing = frame_count / processing_time
+                fps_processing = frame_count / processing_time if processing_time > 0 else 0
                 
                 cap.release()
                 out.release()
@@ -251,8 +262,11 @@ elif mode == "Upload Video":
             st.video(out_path)
             
             # Cleanup
-            os.unlink(tfile.name)
-            os.unlink(out_path)
+            try:
+                os.unlink(tfile.name)
+                os.unlink(out_path)
+            except Exception as e:
+                st.warning(f"Failed to clean up temporary files: {e}")
 
 # --- Model Status ---
 col1, col2 = st.columns([3, 1])
@@ -262,8 +276,7 @@ with col1:
         st.success("✅ Model loaded and ready for detection!")
     else:
         st.warning("⚠️ Model not loaded")
-        if model_path is None or not os.path.exists(model_path):
-            st.info("💡 Upload a model or provide a Google Drive link in the sidebar.")
+        st.info("💡 Check the sidebar for error details or upload a model/provided a valid Google Drive link.")
 
 with col2:
     if show_fps and mode == "Upload Video":
