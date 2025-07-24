@@ -30,7 +30,7 @@ MODEL_DIR = "models"
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 # Default Google Drive link for the YOLO model
-DEFAULT_MODEL_URL = "https://drive.google.com/file/d/1eP2sxQtSBb3nAC7kfwT8rQiYu0NLjFDm/view?usp=drive_link"
+DEFAULT_MODEL_URL = "https://drive.google.com/file/d/1eP2sxQtSBb3nAC7kfwT8rQiYu0NLjFDm/view?usp=sharing"
 
 # Title
 st.title("YOLO Trash Detector (CPU)")
@@ -43,6 +43,14 @@ def extract_file_id_from_drive_url(url):
         elif 'id=' in url:
             return url.split('id=')[1].split('&')[0]
     return None
+
+# Function to validate downloaded file
+def validate_model_file(file_path):
+    if not os.path.exists(file_path):
+        return False, "File does not exist"
+    if os.path.getsize(file_path) == 0:
+        return False, "File is empty"
+    return True, "File is valid"
 
 # --- Sidebar: Model selection and settings ---
 st.sidebar.header("Model Setup")
@@ -64,12 +72,17 @@ if model_file is not None:
     try:
         with open(model_path, "wb") as f:
             f.write(model_file.read())
-        st.sidebar.success("Model uploaded successfully!")
+        is_valid, validation_msg = validate_model_file(model_path)
+        if is_valid:
+            st.sidebar.success(f"Model uploaded successfully! {validation_msg}")
+        else:
+            st.sidebar.error(f"Uploaded model is invalid: {validation_msg}")
+            model_path = None
     except Exception as e:
         st.sidebar.error(f"Failed to save uploaded model: {e}")
         model_path = None
 elif drive_url:
-    # Use user-provided Google Drive link
+    # Use user-provided Google Drive link<JY> link
     file_id = extract_file_id_from_drive_url(drive_url)
     if file_id:
         model_path = os.path.join(MODEL_DIR, "downloaded_model.pt")
@@ -77,10 +90,11 @@ elif drive_url:
             st.sidebar.info("Downloading model from provided Google Drive link...")
             try:
                 gdown.download(f"https://drive.google.com/uc?id={file_id}", model_path, quiet=False)
-                if os.path.exists(model_path):
-                    st.sidebar.success("Model downloaded successfully!")
+                is_valid, validation_msg = validate_model_file(model_path)
+                if is_valid:
+                    st.sidebar.success(f"Model downloaded successfully! {validation_msg}")
                 else:
-                    st.sidebar.error("Download completed, but model file was not found.")
+                    st.sidebar.error(f"Downloaded model is invalid: {validation_msg}")
                     model_path = None
             except Exception as e:
                 st.sidebar.error(f"Download failed: {e}")
@@ -96,10 +110,11 @@ else:
             st.sidebar.info("Downloading default model from Google Drive...")
             try:
                 gdown.download(f"https://drive.google.com/uc?id={file_id}", model_path, quiet=False)
-                if os.path.exists(model_path):
-                    st.sidebar.success("Default model downloaded successfully!")
+                is_valid, validation_msg = validate_model_file(model_path)
+                if is_valid:
+                    st.sidebar.success(f"Default model downloaded successfully! {validation_msg}")
                 else:
-                    st.sidebar.error("Download completed, but model file was not found.")
+                    st.sidebar.error(f"Default model is invalid: {validation_msg}")
                     model_path = None
             except Exception as e:
                 st.sidebar.error(f"Default model download failed: {e}")
@@ -119,9 +134,9 @@ if model_path and os.path.exists(model_path):
 else:
     st.session_state.model = None
     if model_path:
-        st.sidebar.error(f"Model file not found at: {model_path}")
+        st.sidebar.error(f"Model file not found or invalid at: {model_path}")
     else:
-        st.sidebar.error("No valid model file provided.")
+        st.sidebar.error("No valid model file provided. Please upload a model or provide a valid Google Drive link.")
 
 # --- Main: Mode selection ---
 mode = st.selectbox("Choose Detection Mode", ["Upload Image", "Upload Video"])
