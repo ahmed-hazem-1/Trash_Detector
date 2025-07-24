@@ -22,6 +22,9 @@ if 'detections' not in st.session_state:
 MODEL_DIR = "models"
 os.makedirs(MODEL_DIR, exist_ok=True)
 
+# Default Google Drive link for the YOLO model
+DEFAULT_MODEL_URL = "https://drive.google.com/file/d/1eP2sxQtSBb3nAC7kfwT8rQiYu0NLjFDm/view?usp=drive_link"
+
 # Title
 st.title("YOLO Trash Detector (CPU)")
 
@@ -39,10 +42,11 @@ st.sidebar.header("Model Setup")
 
 # Model upload or download
 model_file = st.sidebar.file_uploader("Upload YOLO Model (.pt)", type=["pt"])
-drive_url = st.sidebar.text_input("Or paste Google Drive link to download model")
+drive_url = st.sidebar.text_input("Or paste Google Drive link to download model", value="")
 
 model_path = None
 
+# Handle model loading
 if model_file is not None:
     # Save uploaded model
     model_path = os.path.join(MODEL_DIR, "uploaded_model.pt")
@@ -50,11 +54,12 @@ if model_file is not None:
         f.write(model_file.read())
     st.sidebar.success("Model uploaded successfully!")
 elif drive_url:
+    # Use user-provided Google Drive link
     file_id = extract_file_id_from_drive_url(drive_url)
     if file_id:
         model_path = os.path.join(MODEL_DIR, "downloaded_model.pt")
         if not os.path.exists(model_path):
-            st.sidebar.info("Downloading model from Google Drive...")
+            st.sidebar.info("Downloading model from provided Google Drive link...")
             try:
                 gdown.download(f"https://drive.google.com/uc?id={file_id}", model_path, quiet=False)
                 st.sidebar.success("Model downloaded successfully!")
@@ -63,6 +68,21 @@ elif drive_url:
                 model_path = None
     else:
         st.sidebar.error("Invalid Google Drive link.")
+else:
+    # Use default Google Drive link
+    file_id = extract_file_id_from_drive_url(DEFAULT_MODEL_URL)
+    if file_id:
+        model_path = os.path.join(MODEL_DIR, "default_model.pt")
+        if not os.path.exists(model_path):
+            st.sidebar.info("Downloading default model from Google Drive...")
+            try:
+                gdown.download(f"https://drive.google.com/uc?id={file_id}", model_path, quiet=False)
+                st.sidebar.success("Default model downloaded successfully!")
+            except Exception as e:
+                st.sidebar.error(f"Download failed: {e}")
+                model_path = None
+    else:
+        st.sidebar.error("Invalid default Google Drive link.")
 
 # Settings
 confidence = st.sidebar.slider("Confidence Threshold", 0.1, 1.0, 0.25, 0.05)
