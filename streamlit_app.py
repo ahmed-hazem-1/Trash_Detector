@@ -8,6 +8,8 @@ import os
 import time
 from ultralytics import YOLO
 import gdown
+import av
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 
 # Page configuration
 st.set_page_config(page_title="YOLO Trash Detector", layout="centered")
@@ -17,23 +19,18 @@ if 'fps' not in st.session_state:
     st.session_state.fps = 0
 if 'detections' not in st.session_state:
     st.session_state.detections = []
-if 'model' not in st.session_state:
-    st.session_state.model = None
 
-# Initialize sidebar variables to avoid NameError
-confidence = 0.25
-frame_skip = 3
-show_fps = True
+# Check for CUDA availability
+if not torch.cuda.is_available():
+    st.error("CUDA device not available. This app requires a GPU.")
+    st.stop()
 
 # Create directory for models
 MODEL_DIR = "models"
 os.makedirs(MODEL_DIR, exist_ok=True)
 
-# Default Google Drive link for the YOLO model
-DEFAULT_MODEL_URL = "https://drive.google.com/file/d/1eP2sxQtSBb3nAC7kfwT8rQiYu0NLjFDm/view?usp=sharing"
-
 # Title
-st.title("YOLO Trash Detector (CPU)")
+st.title("YOLO Trash Detector (CUDA Only)")
 
 # Function to extract file ID from Google Drive link
 def extract_file_id_from_drive_url(url):
@@ -44,116 +41,68 @@ def extract_file_id_from_drive_url(url):
             return url.split('id=')[1].split('&')[0]
     return None
 
-# Function to validate downloaded file
-def validate_model_file(file_path):
-    if not os.path.exists(file_path):
-        return False, "File does not exist"
-    if os.path.getsize(file_path) == 0:
-        return False, "File is empty"
-    return True, "File is valid"
-
 # --- Sidebar: Model selection and settings ---
 st.sidebar.header("Model Setup")
 
 # Model upload or download
 model_file = st.sidebar.file_uploader("Upload YOLO Model (.pt)", type=["pt"])
-drive_url = st.sidebar.text_input("Or paste Google Drive link to download model", value="")
+drive_url = st.sidebar.text_input("Or paste Google Drive link to download model")
 
-# Sidebar settings
-confidence = st.sidebar.slider("Confidence Threshold", 0.1, 1.0, confidence, 0.05)
-frame_skip = st.sidebar.selectbox("Process Every Nth Frame (for video)", [1, 2, 3, 4, 5], index=2)
-show_fps = st.sidebar.checkbox("Show FPS Counter (for video)", value=show_fps)
-
-# Handle model loading
 model_path = None
+
 if model_file is not None:
     # Save uploaded model
     model_path = os.path.join(MODEL_DIR, "uploaded_model.pt")
-    try:
-        with open(model_path, "wb") as f:
-            f.write(model_file.read())
-        is_valid, validation_msg = validate_model_file(model_path)
-        if is_valid:
-            st.sidebar.success(f"Model uploaded successfully! {validation_msg}")
-        else:
-            st.sidebar.error(f"Uploaded model is invalid: {validation_msg}")
-            model_path = None
-    except Exception as e:
-        st.sidebar.error(f"Failed to save uploaded model: {e}")
-        model_path = None
+    with open(model_path, "wb") as f:
+        f.write(model_file.read())
+    st.sidebar.success("Model uploaded successfully!")
 elif drive_url:
-    # Use user-provided Google Drive link<JY> link
     file_id = extract_file_id_from_drive_url(drive_url)
     if file_id:
         model_path = os.path.join(MODEL_DIR, "downloaded_model.pt")
         if not os.path.exists(model_path):
-            st.sidebar.info("Downloading model from provided Google Drive link...")
+            st.sidebar.info("Downloading model from Google Drive...")
             try:
                 gdown.download(f"https://drive.google.com/uc?id={file_id}", model_path, quiet=False)
-                is_valid, validation_msg = validate_model_file(model_path)
-                if is_valid:
-                    st.sidebar.success(f"Model downloaded successfully! {validation_msg}")
-                else:
-                    st.sidebar.error(f"Downloaded model is invalid: {validation_msg}")
-                    model_path = None
+                st.sidebar.success("Model downloaded successfully!")
             except Exception as e:
                 st.sidebar.error(f"Download failed: {e}")
                 model_path = None
     else:
         st.sidebar.error("Invalid Google Drive link.")
-else:
-    # Use default Google Drive link
-    file_id = extract_file_id_from_drive_url(DEFAULT_MODEL_URL)
-    if file_id:
-        model_path = os.path.join(MODEL_DIR, "default_model.pt")
-        if not os.path.exists(model_path):
-            st.sidebar.info("Downloading default model from Google Drive...")
-            try:
-                gdown.download(f"https://drive.google.com/uc?id={file_id}", model_path, quiet=False)
-                is_valid, validation_msg = validate_model_file(model_path)
-                if is_valid:
-                    st.sidebar.success(f"Default model downloaded successfully! {validation_msg}")
-                else:
-                    st.sidebar.error(f"Default model is invalid: {validation_msg}")
-                    model_path = None
-            except Exception as e:
-                st.sidebar.error(f"Default model download failed: {e}")
-                model_path = None
-    else:
-        st.sidebar.error("Invalid default Google Drive link.")
+
+# Settings
+confidence = st.sidebar.slider("Confidence Threshold", 0.1, 1.0, 0.25, 0.05)
+frame_skip = st.sidebar.selectbox("Process Every Nth Frame", [1, 2, 3, 4, 5], index=2)
+show_fps = st.sidebar.checkbox("Show FPS Counter", value=True)
 
 # --- Load model ---
+model = None
 if model_path and os.path.exists(model_path):
     try:
-        st.sidebar.info(f"Loading model from {model_path}...")
-        st.session_state.model = YOLO(model_path)
-        st.sidebar.success("Model loaded on CPU!")
+        model = YOLO(model_path)
+        model.to("cuda")
+        st.sidebar.success("Model loaded on CUDA!")
+        # Store model in session state for later use
+        st.session_state.model = model
     except Exception as e:
         st.sidebar.error(f"Failed to load model: {e}")
         st.session_state.model = None
 else:
     st.session_state.model = None
-    if model_path:
-        st.sidebar.error(f"Model file not found or invalid at: {model_path}")
-    else:
-        st.sidebar.error("No valid model file provided. Please upload a model or provide a valid Google Drive link.")
 
 # --- Main: Mode selection ---
-mode = st.selectbox("Choose Detection Mode", ["Upload Image", "Upload Video"])
+mode = st.selectbox("Choose Detection Mode", ["Upload Image", "Upload Video", "Real-Time Camera"])
 
-if st.session_state.model is None:
-    st.warning("Model could not be loaded. Check the sidebar for error details.")
+if model is None:
+    st.warning("Please upload or download a model first.")
     st.stop()
 
 # Inference function
 def run_inference(img):
-    try:
-        results = st.session_state.model(img, conf=confidence, imgsz=256, verbose=False)
-        annotated = results[0].plot()
-        return annotated, results
-    except Exception as e:
-        st.error(f"Inference failed: {e}")
-        return None, None
+    results = model(img, conf=confidence, imgsz=256, device="cuda", verbose=False)
+    annotated = results[0].plot()
+    return annotated, results
 
 # --- Mode: Upload Image ---
 if mode == "Upload Image":
@@ -171,21 +120,17 @@ if mode == "Upload Image":
         # Run detection
         with st.spinner("Detecting objects..."):
             annotated, results = run_inference(img_np)
-            if annotated is not None:
-                st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), caption="Detection Result", use_column_width=True)
+            st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), caption="Detection Result", use_column_width=True)
         
         # Display detections
         st.subheader("Detected Objects")
-        if results and hasattr(results[0], 'boxes'):
-            boxes = results[0].boxes
-            if boxes is not None and hasattr(boxes, 'conf') and hasattr(boxes, 'cls'):
-                for conf, cls in zip(boxes.conf, boxes.cls):
-                    class_name = st.session_state.model.names[int(cls)] if hasattr(st.session_state.model, "names") else str(cls)
-                    st.write(f"{class_name}: {conf:.2f}")
-            else:
-                st.write("No objects detected.")
+        boxes = getattr(results[0], 'boxes', None)
+        if boxes is not None and hasattr(boxes, 'conf') and hasattr(boxes, 'cls'):
+            for conf, cls in zip(boxes.conf, boxes.cls):
+                class_name = model.names[int(cls)] if hasattr(model, "names") else str(cls)
+                st.write(f"{class_name}: {conf:.2f}")
         else:
-            st.write("No objects detected or inference failed.")
+            st.write("No objects detected.")
 
 # --- Mode: Upload Video ---
 elif mode == "Upload Video":
@@ -234,12 +179,10 @@ elif mode == "Upload Video":
                     if frame_count % frame_skip == 0:
                         # Run detection
                         annotated, results = run_inference(frame)
-                        if annotated is None:
-                            continue
                         
-                        # Log the detection details
+                        # Log the detection details for debugging
                         st.session_state.frame_being_processed = frame_count
-
+                        
                         # Check if there are any detections in this frame
                         boxes = getattr(results[0], 'boxes', None)
                         frame_has_detections = False
@@ -255,7 +198,7 @@ elif mode == "Upload Video":
                             
                             # Collect detections
                             for conf, cls in zip(boxes.conf, boxes.cls):
-                                class_name = st.session_state.model.names[int(cls)] if hasattr(st.session_state.model, "names") else str(cls)
+                                class_name = model.names[int(cls)] if hasattr(model, "names") else str(cls)
                                 detections.append(f"Frame {frame_count}: {class_name} ({conf:.2f})")
                         
                         # Write the annotated frame
@@ -265,7 +208,7 @@ elif mode == "Upload Video":
                 
                 # Calculate processing time
                 processing_time = time.time() - start_time
-                fps_processing = frame_count / processing_time if processing_time > 0 else 0
+                fps_processing = frame_count / processing_time
                 
                 cap.release()
                 out.release()
@@ -296,13 +239,121 @@ elif mode == "Upload Video":
             st.video(out_path)
             
             # Cleanup
-            try:
-                os.unlink(tfile.name)
-                os.unlink(out_path)
-            except Exception as e:
-                st.warning(f"Failed to clean up temporary files: {e}")
+            os.unlink(tfile.name)
+            os.unlink(out_path)
 
-# --- Model Status ---
+# --- Mode: Real-Time Camera ---
+elif mode == "Real-Time Camera":
+    # Video processor class for real-time detection
+    class YOLOProcessor:
+        def __init__(self):
+            self.frame_count = 0
+            self.fps = 0
+            self.frame_time = time.time()
+            self.frame_counter = 0
+            
+        def recv(self, frame):
+            img = frame.to_ndarray(format="bgr24")
+            self.frame_count += 1
+            
+            # FPS calculation
+            self.frame_counter += 1
+            if (time.time() - self.frame_time) > 1.0:
+                self.fps = self.frame_counter / (time.time() - self.frame_time)
+                self.frame_counter = 0
+                self.frame_time = time.time()
+                # Store FPS in session state for display elsewhere
+                st.session_state.fps = self.fps
+                
+            # Skip frames for performance
+            if self.frame_count % frame_skip != 0:
+                return av.VideoFrame.from_ndarray(img, format="bgr24")
+                
+            # Run detection
+            try:
+                annotated, results = run_inference(img)
+                
+                # Store detections in session state
+                detections = []
+                boxes = getattr(results[0], 'boxes', None)
+                if boxes is not None and hasattr(boxes, 'conf') and hasattr(boxes, 'cls'):
+                    for conf, cls in zip(boxes.conf, boxes.cls):
+                        class_name = model.names[int(cls)] if hasattr(model, "names") else str(cls)
+                        detections.append(f"{class_name}: {conf:.2f}")
+                st.session_state.detections = detections
+                
+                # Add FPS counter to frame
+                if show_fps:
+                    cv2.putText(annotated, f"FPS: {self.fps:.1f}", (10, 30), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                return av.VideoFrame.from_ndarray(annotated, format="bgr24")
+            except Exception as e:
+                print(f"Error in detection: {e}")
+                return av.VideoFrame.from_ndarray(img, format="bgr24")
+    
+    # WebRTC configuration for camera
+    rtc_config = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
+    
+    st.info("Click START below to activate the camera.")
+    
+    webrtc_ctx = webrtc_streamer(
+        key="yolo-detector",
+        mode=WebRtcMode.SENDRECV,
+        rtc_configuration=rtc_config,
+        video_processor_factory=YOLOProcessor,
+        media_stream_constraints={"video": True, "audio": False},
+        async_processing=True,
+    )
+    
+    # Display information about the stream
+    if webrtc_ctx.state.playing:
+        st.success("Camera active. Detection running...")
+        
+        # Show FPS if enabled
+        if show_fps:
+            st.metric("Current FPS", f"{st.session_state.fps:.1f}")
+        
+        # Show detections
+        if st.session_state.detections:
+            st.subheader("Live Detections")
+            for detection in st.session_state.detections[:5]:
+                st.write(f"• {detection}")
+            if len(st.session_state.detections) > 5:
+                st.write(f"• ... and {len(st.session_state.detections) - 5} more")
+    
+    st.markdown("""
+    ### Camera Notes:
+    - Allow camera access when prompted
+    - Processing runs on your GPU (CUDA)
+    - Higher confidence = fewer detections
+    - Higher frame skip = better performance
+    """)
+    # Model info section
+    if st.session_state.model is not None:
+        st.divider()
+        st.subheader("📊 Model Information")
+        
+        with st.expander("View Details"):
+            try:
+                st.write(f"**Model Type:** {type(st.session_state.model).__name__}")
+                # Safe check for model.names
+                model_names = getattr(st.session_state.model, "names", None)
+                if isinstance(model_names, dict):
+                    st.write(f"**Classes:** {list(model_names.values())}")
+                    st.write(f"**Number of Classes:** {len(model_names)}")
+                else:
+                    st.write("**Classes:** Not available")
+                    st.write("**Number of Classes:** Not available")
+                # Device info
+                try:
+                    model_device = next(st.session_state.model.model.parameters()).device
+                    st.write(f"**Model Device:** {model_device}")
+                except:
+                    st.write("**Model Device:** Not available")
+            except Exception as e:
+                st.error(f"Error getting model info: {str(e)}")
+
+# Model status in main area
 col1, col2 = st.columns([3, 1])
 
 with col1:
@@ -310,30 +361,22 @@ with col1:
         st.success("✅ Model loaded and ready for detection!")
     else:
         st.warning("⚠️ Model not loaded")
-        st.info("💡 Check the sidebar for error details or upload a model/provide a valid Google Drive link.")
+        if not model_path.exists():
+            st.info("💡 Click 'Download Model' in the sidebar to get started")
+        else:
+            st.info("💡 Click 'Load Model' in the sidebar to load the downloaded model")
 
 with col2:
-    if show_fps and mode == "Upload Video":
+    if show_fps:
         st.markdown(f'<div class="fps-counter">FPS: {st.session_state.fps:.1f}</div>', unsafe_allow_html=True)
 
-# Note about Real-Time Camera
-st.info("Real-Time Camera mode is not supported on Streamlit Community Cloud due to WebRTC limitations. Use image or video upload modes instead.")
+# WebRTC Configuration
+RTC_CONFIGURATION = RTCConfiguration({
+    "iceServers": [
+        {"urls": ["stun:stun.l.google.com:19302"]},
+        {"urls": ["stun:stun1.l.google.com:19302"]},
+        {"urls": ["stun:stun2.l.google.com:19302"]},
+        {"urls": ["stun:stun.services.mozilla.com"]}
+    ]
+})
 
-# Model info section
-if st.session_state.model is not None:
-    st.divider()
-    st.subheader("📊 Model Information")
-    
-    with st.expander("View Details"):
-        try:
-            st.write(f"**Model Type:** {type(st.session_state.model).__name__}")
-            model_names = getattr(st.session_state.model, "names", None)
-            if isinstance(model_names, dict):
-                st.write(f"**Classes:** {list(model_names.values())}")
-                st.write(f"**Number of Classes:** {len(model_names)}")
-            else:
-                st.write("**Classes:** Not available")
-                st.write("**Number of Classes:** Not available")
-            st.write("**Model Device:** CPU")
-        except Exception as e:
-            st.error(f"Error getting model info: {str(e)}")
