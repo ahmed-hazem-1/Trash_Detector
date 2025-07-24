@@ -17,6 +17,13 @@ if 'fps' not in st.session_state:
     st.session_state.fps = 0
 if 'detections' not in st.session_state:
     st.session_state.detections = []
+if 'model' not in st.session_state:
+    st.session_state.model = None
+
+# Initialize sidebar variables to avoid NameError
+confidence = 0.25
+frame_skip = 3
+show_fps = True
 
 # Create directory for models
 MODEL_DIR = "models"
@@ -44,15 +51,23 @@ st.sidebar.header("Model Setup")
 model_file = st.sidebar.file_uploader("Upload YOLO Model (.pt)", type=["pt"])
 drive_url = st.sidebar.text_input("Or paste Google Drive link to download model", value="")
 
-model_path = None
+# Sidebar settings
+confidence = st.sidebar.slider("Confidence Threshold", 0.1, 1.0, confidence, 0.05)
+frame_skip = st.sidebar.selectbox("Process Every Nth Frame (for video)", [1, 2, 3, 4, 5], index=2)
+show_fps = st.sidebar.checkbox("Show FPS Counter (for video)", value=show_fps)
 
 # Handle model loading
+model_path = None
 if model_file is not None:
     # Save uploaded model
     model_path = os.path.join(MODEL_DIR, "uploaded_model.pt")
-    with open(model_path, "wb") as f:
-        f.write(model_file.read())
-    st.sidebar.success("Model uploaded successfully!")
+    try:
+        with open(model_path, "wb") as f:
+            f.write(model_file.read())
+        st.sidebar.success("Model uploaded successfully!")
+    except Exception as e:
+        st.sidebar.error(f"Failed to save uploaded model: {e}")
+        model_path = None
 elif drive_url:
     # Use user-provided Google Drive link
     file_id = extract_file_id_from_drive_url(drive_url)
@@ -62,7 +77,11 @@ elif drive_url:
             st.sidebar.info("Downloading model from provided Google Drive link...")
             try:
                 gdown.download(f"https://drive.google.com/uc?id={file_id}", model_path, quiet=False)
-                st.sidebar.success("Model downloaded successfully!")
+                if os.path.exists(model_path):
+                    st.sidebar.success("Model downloaded successfully!")
+                else:
+                    st.sidebar.error("Download completed, but model file was not found.")
+                    model_path = None
             except Exception as e:
                 st.sidebar.error(f"Download failed: {e}")
                 model_path = None
@@ -89,32 +108,32 @@ else:
         st.sidebar.error("Invalid default Google Drive link.")
 
 # --- Load model ---
-model = None
 if model_path and os.path.exists(model_path):
     try:
         st.sidebar.info(f"Loading model from {model_path}...")
-        model = YOLO(model_path)
-        # No CUDA, runs on CPU by default
+        st.session_state.model = YOLO(model_path)
         st.sidebar.success("Model loaded on CPU!")
-        st.session_state.model = model
     except Exception as e:
         st.sidebar.error(f"Failed to load model: {e}")
         st.session_state.model = None
 else:
     st.session_state.model = None
-    st.sidebar.error(f"Model path is invalid or file does not exist: {model_path}")
+    if model_path:
+        st.sidebar.error(f"Model file not found at: {model_path}")
+    else:
+        st.sidebar.error("No valid model file provided.")
 
 # --- Main: Mode selection ---
-mode = st.selectbox("Choose Detection Mode", ["Upload Image", "Upload Video"])  # Removed Real-Time Camera
+mode = st.selectbox("Choose Detection Mode", ["Upload Image", "Upload Video"])
 
-if model is None:
+if st.session_state.model is None:
     st.warning("Model could not be loaded. Check the sidebar for error details.")
     st.stop()
 
 # Inference function
 def run_inference(img):
     try:
-        results = model(img, conf=confidence, imgsz=256, verbose=False)
+        results = st.session_state.model(img, conf=confidence, imgsz=256, verbose=False)
         annotated = results[0].plot()
         return annotated, results
     except Exception as e:
@@ -146,7 +165,7 @@ if mode == "Upload Image":
             boxes = results[0].boxes
             if boxes is not None and hasattr(boxes, 'conf') and hasattr(boxes, 'cls'):
                 for conf, cls in zip(boxes.conf, boxes.cls):
-                    class_name = model.names[int(cls)] if hasattr(model, "names") else str(cls)
+                    class_name = st.session_state.model.names[int(cls)] if hasattr(st.session_state.model, "names") else str(cls)
                     st.write(f"{class_name}: {conf:.2f}")
             else:
                 st.write("No objects detected.")
@@ -221,7 +240,7 @@ elif mode == "Upload Video":
                             
                             # Collect detections
                             for conf, cls in zip(boxes.conf, boxes.cls):
-                                class_name = model.names[int(cls)] if hasattr(model, "names") else str(cls)
+                                class_name = st.session_state.model.names[int(cls)] if hasattr(st.session_state.model, "names") else str(cls)
                                 detections.append(f"Frame {frame_count}: {class_name} ({conf:.2f})")
                         
                         # Write the annotated frame
@@ -276,7 +295,7 @@ with col1:
         st.success("✅ Model loaded and ready for detection!")
     else:
         st.warning("⚠️ Model not loaded")
-        st.info("💡 Check the sidebar for error details or upload a model/provided a valid Google Drive link.")
+        st.info("💡 Check the sidebar for error details or upload a model/provide a valid Google Drive link.")
 
 with col2:
     if show_fps and mode == "Upload Video":
