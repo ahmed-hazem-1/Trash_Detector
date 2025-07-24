@@ -1,7 +1,3 @@
-Below is a clear and simple README for your GitHub repository, incorporating details about the trash detection project and the Streamlit app you created. The README is structured to provide an overview, installation instructions, usage details, and relevant links.
-
-
-
 # Trash Detector
 
 ## Overview
