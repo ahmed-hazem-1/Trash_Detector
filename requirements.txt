@@ -10,30 +10,22 @@ opencv-python-headless==4.8.1.78
 numpy==1.26.4
 pillow==10.4.0
 
-# Web Framework and UI
+# Web Framework and UI - REMOVED streamlit-webrtc for cloud compatibility
 streamlit==1.28.1
-streamlit-webrtc==0.63.3
 
-# Video processing
-av==14.4.0
-
-# Utilities
+# Utilities for model download
 gdown==4.7.1
-psutil==7.0.0
 
 # Scientific computing
 scipy==1.15.3
-matplotlib==3.10.3
 pandas==2.3.1
 
-# Additional dependencies
+# Essential dependencies
 packaging==23.2
 requests==2.32.4
 PyYAML==6.0.2
 tqdm==4.67.1
 typing_extensions==4.14.1
-charset-normalizer==3.4.2
-certifi==2025.7.14
 
 # For better compatibility
 setuptools>=65.0.0
