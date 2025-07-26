@@ -4,10 +4,10 @@ import numpy as np
 import tempfile
 import os
 import time
+import base64
 from PIL import Image
 import gdown
-import av
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
+import io
 
 # Try to import cv2 with fallback handling
 try:
@@ -34,7 +34,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better UI
+# Custom CSS for better UI and camera functionality
 st.markdown("""
 <style>
     .main-header {
@@ -45,27 +45,50 @@ st.markdown("""
         border-radius: 10px;
         margin-bottom: 2rem;
     }
-    .fps-counter {
-        background-color: #1f4e79;
-        color: white;
-        padding: 10px;
-        border-radius: 5px;
+    .camera-container {
         text-align: center;
-        font-weight: bold;
+        padding: 20px;
+        border: 2px dashed #ccc;
+        border-radius: 10px;
+        margin: 20px 0;
     }
-    .status-success {
-        background-color: #d4edda;
-        border: 1px solid #c3e6cb;
-        border-radius: 5px;
+    .upload-container {
+        padding: 20px;
+        border: 2px dashed #4CAF50;
+        border-radius: 10px;
+        text-align: center;
+        background-color: #f9f9f9;
+    }
+    .detection-result {
+        background-color: #e8f5e8;
+        border-left: 4px solid #4CAF50;
         padding: 10px;
-        color: #155724;
+        margin: 10px 0;
+        border-radius: 5px;
     }
-    .status-warning {
+    .warning-box {
         background-color: #fff3cd;
         border: 1px solid #ffeaa7;
         border-radius: 5px;
-        padding: 10px;
+        padding: 15px;
         color: #856404;
+        margin: 10px 0;
+    }
+    .success-box {
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        border-radius: 5px;
+        padding: 15px;
+        color: #155724;
+        margin: 10px 0;
+    }
+    .info-box {
+        background-color: #d1ecf1;
+        border: 1px solid #bee5eb;
+        border-radius: 5px;
+        padding: 15px;
+        color: #0c5460;
+        margin: 10px 0;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -77,20 +100,22 @@ if 'detections' not in st.session_state:
     st.session_state.detections = []
 if 'model' not in st.session_state:
     st.session_state.model = None
+if 'processing_video' not in st.session_state:
+    st.session_state.processing_video = False
 
 # Check dependencies
 if not CV2_AVAILABLE or not YOLO_AVAILABLE:
     st.stop()
 
 # Title with styling
-st.markdown('<div class="main-header"><h1>🗑️ YOLO Trash Detector</h1><p>Professional AI-Powered Waste Detection System</p></div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header"><h1>🗑️ YOLO Trash Detector</h1><p>Cloud-Friendly AI-Powered Waste Detection System</p></div>', unsafe_allow_html=True)
 
-# Check for CUDA availability
+# Check for device availability
 device = "cuda" if torch.cuda.is_available() else "cpu"
 if device == "cpu":
-    st.warning("⚠️ CUDA not available. Running on CPU (slower performance)")
+    st.markdown('<div class="warning-box">⚠️ Running on CPU. For faster processing, consider using a CUDA-enabled environment.</div>', unsafe_allow_html=True)
 else:
-    st.success("✅ CUDA available. GPU acceleration enabled")
+    st.markdown('<div class="success-box">✅ CUDA available. GPU acceleration enabled for optimal performance.</div>', unsafe_allow_html=True)
 
 # Create directory for models
 MODEL_DIR = "models"
@@ -124,6 +149,32 @@ def run_inference(model, img, confidence=0.25):
     except Exception as e:
         return None, None, str(e)
 
+def process_image_from_bytes(image_bytes, model, confidence):
+    """Process image from bytes data"""
+    try:
+        # Convert bytes to PIL Image
+        image = Image.open(io.BytesIO(image_bytes))
+        img_array = np.array(image)
+        
+        # Handle different image formats
+        if len(img_array.shape) == 2:  # Grayscale
+            img_array = cv2.cvtColor(img_array, cv2.COLOR_GRAY2BGR)
+        elif img_array.shape[2] == 4:  # RGBA
+            img_array = cv2.cvtColor(img_array, cv2.COLOR_RGBA2BGR)
+        elif img_array.shape[2] == 3:  # RGB
+            img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+        
+        # Run inference
+        annotated, results, error = run_inference(model, img_array, confidence)
+        
+        if error:
+            return None, None, error
+            
+        return annotated, results, None
+        
+    except Exception as e:
+        return None, None, str(e)
+
 # Sidebar configuration
 with st.sidebar:
     st.header("🔧 Configuration")
@@ -132,11 +183,19 @@ with st.sidebar:
     st.subheader("📁 Model Setup")
     
     model_file = st.file_uploader("Upload YOLO Model (.pt)", type=["pt"])
-    drive_url = st.text_input("Or paste Google Drive link")
+    
+    # Default model option
+    use_default = st.checkbox("Use YOLOv8n (will download automatically)", value=True)
+    
+    drive_url = st.text_input("Or paste Google Drive link to custom model")
     
     model_path = None
     
-    if model_file is not None:
+    if use_default and not model_file and not drive_url:
+        model_path = os.path.join(MODEL_DIR, "yolov8n.pt")
+        if not os.path.exists(model_path):
+            st.info("Default YOLOv8n model will be downloaded on first use")
+    elif model_file is not None:
         model_path = os.path.join(MODEL_DIR, "uploaded_model.pt")
         with open(model_path, "wb") as f:
             f.write(model_file.read())
@@ -160,24 +219,34 @@ with st.sidebar:
             st.error("❌ Invalid Google Drive link")
     
     # Load model button
-    if model_path and os.path.exists(model_path):
+    if model_path:
         if st.button("🚀 Load Model", type="primary"):
             with st.spinner("Loading model..."):
-                model, error = safe_model_load(model_path)
-                if model:
-                    st.session_state.model = model
-                    st.success("✅ Model loaded successfully!")
-                    st.rerun()
+                if use_default and not os.path.exists(model_path):
+                    # Download default YOLOv8n model
+                    try:
+                        model = YOLO('yolov8n.pt')  # This will auto-download
+                        if device == "cuda":
+                            model.to("cuda")
+                        st.session_state.model = model
+                        st.success("✅ YOLOv8n model loaded successfully!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Failed to load default model: {e}")
                 else:
-                    st.error(f"❌ Failed to load model: {error}")
+                    model, error = safe_model_load(model_path)
+                    if model:
+                        st.session_state.model = model
+                        st.success("✅ Model loaded successfully!")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Failed to load model: {error}")
     
     st.divider()
     
     # Detection settings
     st.subheader("⚙️ Detection Settings")
     confidence = st.slider("Confidence Threshold", 0.1, 1.0, 0.25, 0.05)
-    frame_skip = st.selectbox("Process Every Nth Frame", [1, 2, 3, 4, 5], index=2)
-    show_fps = st.checkbox("Show FPS Counter", value=True)
     
     st.divider()
     
@@ -197,14 +266,14 @@ with st.sidebar:
 
 # Main content area
 if st.session_state.model is None:
-    st.warning("⚠️ Please upload and load a YOLO model first")
-    st.info("💡 Use the sidebar to upload a model file or provide a Google Drive link")
+    st.markdown('<div class="warning-box">⚠️ Please load a YOLO model first. You can use the default YOLOv8n model or upload your own.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="info-box">💡 Use the sidebar to select and load a model. The default YOLOv8n model works well for general object detection.</div>', unsafe_allow_html=True)
     st.stop()
 
 # Mode selection
 st.subheader("🎯 Detection Mode")
 mode = st.selectbox("Choose detection method:", 
-                   ["📸 Upload Image", "🎥 Upload Video", "📹 Real-Time Camera"],
+                   ["📸 Upload Image", "📹 Camera Capture", "🎥 Upload Video"],
                    format_func=lambda x: x)
 
 # Image detection mode
@@ -223,16 +292,11 @@ if mode == "📸 Upload Image":
         
         with col2:
             st.subheader("Detection Results")
-            img_np = np.array(img)
-            
-            # Handle different image formats
-            if len(img_np.shape) == 2:  # Grayscale
-                img_np = cv2.cvtColor(img_np, cv2.COLOR_GRAY2BGR)
-            elif img_np.shape[2] == 4:  # RGBA
-                img_np = cv2.cvtColor(img_np, cv2.COLOR_RGBA2BGR)
             
             with st.spinner("🔍 Detecting objects..."):
-                annotated, results, error = run_inference(st.session_state.model, img_np, confidence)
+                annotated, results, error = process_image_from_bytes(
+                    uploaded_img.getvalue(), st.session_state.model, confidence
+                )
                 
                 if error:
                     st.error(f"Detection failed: {error}")
@@ -253,9 +317,129 @@ if mode == "📸 Upload Image":
                             })
                         
                         st.dataframe(detection_data, use_container_width=True)
-                        st.success(f"✅ Found {len(detection_data)} objects")
+                        st.markdown(f'<div class="detection-result">✅ Found {len(detection_data)} objects</div>', unsafe_allow_html=True)
                     else:
                         st.info("No objects detected. Try lowering the confidence threshold.")
+
+# Camera capture mode (Cloud-friendly)
+elif mode == "📹 Camera Capture":
+    st.subheader("Camera Capture")
+    
+    st.markdown('<div class="camera-container">', unsafe_allow_html=True)
+    
+    # HTML5 Camera capture component
+    camera_html = """
+    <div style="text-align: center;">
+        <video id="video" width="640" height="480" autoplay style="border: 2px solid #4CAF50; border-radius: 10px;"></video>
+        <br><br>
+        <button id="capture" onclick="captureImage()" style="
+            background-color: #4CAF50; 
+            color: white; 
+            padding: 15px 32px; 
+            text-align: center; 
+            text-decoration: none; 
+            display: inline-block; 
+            font-size: 16px; 
+            margin: 4px 2px; 
+            cursor: pointer; 
+            border: none; 
+            border-radius: 5px;
+        ">📸 Capture Photo</button>
+        <br><br>
+        <canvas id="canvas" width="640" height="480" style="display: none;"></canvas>
+        <img id="captured" style="max-width: 100%; height: auto; border: 2px solid #4CAF50; border-radius: 10px; display: none;">
+    </div>
+    
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const capturedImg = document.getElementById('captured');
+        const ctx = canvas.getContext('2d');
+        
+        // Access camera
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => {
+                video.srcObject = stream;
+            })
+            .catch(err => {
+                console.error('Error accessing camera: ', err);
+                alert('Error accessing camera. Please make sure you have granted camera permissions.');
+            });
+        
+        function captureImage() {
+            // Draw video frame to canvas
+            ctx.drawImage(video, 0, 0, 640, 480);
+            
+            // Convert to base64
+            const dataURL = canvas.toDataURL('image/jpeg');
+            
+            // Show captured image
+            capturedImg.src = dataURL;
+            capturedImg.style.display = 'block';
+            
+            // Send to Streamlit (you'll need to handle this part)
+            window.parent.postMessage({
+                type: 'camera-capture',
+                data: dataURL
+            }, '*');
+        }
+    </script>
+    """
+    
+    # Display camera interface
+    st.components.v1.html(camera_html, height=600)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Alternative: Simple file upload for mobile users
+    st.markdown("---")
+    st.subheader("📱 Alternative: Upload from Device Camera")
+    st.markdown('<div class="info-box">On mobile devices, you can use the camera directly by uploading an image below:</div>', unsafe_allow_html=True)
+    
+    camera_upload = st.file_uploader(
+        "Take/Upload a photo", 
+        type=["jpg", "jpeg", "png"],
+        help="On mobile, this will open your camera app"
+    )
+    
+    if camera_upload:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Captured Image")
+            img = Image.open(camera_upload)
+            st.image(img, use_column_width=True)
+        
+        with col2:
+            st.subheader("Detection Results")
+            
+            with st.spinner("🔍 Analyzing image..."):
+                annotated, results, error = process_image_from_bytes(
+                    camera_upload.getvalue(), st.session_state.model, confidence
+                )
+                
+                if error:
+                    st.error(f"Detection failed: {error}")
+                elif annotated is not None:
+                    st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), use_column_width=True)
+                    
+                    # Display detection details
+                    boxes = getattr(results[0], 'boxes', None)
+                    if boxes is not None and hasattr(boxes, 'conf') and len(boxes.conf) > 0:
+                        st.subheader("🎯 Detected Objects")
+                        detection_data = []
+                        for conf, cls in zip(boxes.conf, boxes.cls):
+                            class_name = st.session_state.model.names.get(int(cls), f"Class_{int(cls)}")
+                            detection_data.append({
+                                "Object": class_name,
+                                "Confidence": f"{conf:.2f}",
+                                "Score": f"{conf*100:.1f}%"
+                            })
+                        
+                        st.dataframe(detection_data, use_container_width=True)
+                        st.markdown(f'<div class="detection-result">✅ Detected {len(detection_data)} objects with AI analysis</div>', unsafe_allow_html=True)
+                    else:
+                        st.info("No objects detected. Try adjusting the confidence threshold or ensure the image is clear.")
 
 # Video detection mode
 elif mode == "🎥 Upload Video":
@@ -280,204 +464,125 @@ elif mode == "🎥 Upload Video":
             fps = int(cap.get(cv2.CAP_PROP_FPS)) or 30
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             
-            st.info(f"📹 Video: {frame_width}x{frame_height}, {fps} FPS, {total_frames} frames")
+            st.markdown(f'<div class="info-box">📹 Video Properties: {frame_width}x{frame_height}, {fps} FPS, {total_frames} frames</div>', unsafe_allow_html=True)
+            
+            # Processing options
+            col1, col2 = st.columns(2)
+            with col1:
+                frame_skip = st.selectbox("Process every Nth frame", [1, 2, 3, 5, 10], index=2, help="Higher values = faster processing, fewer detections")
+            with col2:
+                max_frames = st.number_input("Max frames to process", min_value=10, max_value=min(1000, total_frames), value=min(300, total_frames))
             
             if st.button("🚀 Process Video", type="primary"):
-                # Create output video
-                out_path = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                out = cv2.VideoWriter(out_path, fourcc, fps, (frame_width, frame_height))
-                
-                # Progress tracking
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                frame_count = 0
-                detections = []
-                start_time = time.time()
-                
-                while cap.isOpened():
-                    ret, frame = cap.read()
-                    if not ret:
-                        break
+                if not st.session_state.processing_video:
+                    st.session_state.processing_video = True
                     
-                    frame_count += 1
-                    progress = min(frame_count / total_frames, 1.0)
-                    progress_bar.progress(progress)
-                    status_text.text(f"Processing frame {frame_count}/{total_frames}")
+                    # Create output video
+                    out_path = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
+                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                    out = cv2.VideoWriter(out_path, fourcc, fps, (frame_width, frame_height))
                     
-                    # Process every nth frame
-                    if frame_count % frame_skip == 0:
-                        annotated, results, error = run_inference(st.session_state.model, frame, confidence)
-                        if annotated is not None:
-                            # Add frame number
-                            cv2.putText(annotated, f"Frame: {frame_count}", (10, 30), 
-                                      cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                            
-                            # Collect detections
-                            boxes = getattr(results[0], 'boxes', None)
-                            if boxes is not None and hasattr(boxes, 'conf') and len(boxes.conf) > 0:
-                                for conf, cls in zip(boxes.conf, boxes.cls):
-                                    class_name = st.session_state.model.names.get(int(cls), f"Class_{int(cls)}")
-                                    detections.append({
-                                        "frame": frame_count,
-                                        "object": class_name,
-                                        "confidence": float(conf)
-                                    })
-                            
-                            out.write(annotated)
+                    # Progress tracking
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    frame_count = 0
+                    processed_frames = 0
+                    detections = []
+                    start_time = time.time()
+                    
+                    while cap.isOpened() and frame_count < max_frames:
+                        ret, frame = cap.read()
+                        if not ret:
+                            break
+                        
+                        frame_count += 1
+                        progress = min(frame_count / min(max_frames, total_frames), 1.0)
+                        progress_bar.progress(progress)
+                        status_text.text(f"Processing frame {frame_count}/{min(max_frames, total_frames)}")
+                        
+                        # Process every nth frame
+                        if frame_count % frame_skip == 0:
+                            annotated, results, error = run_inference(st.session_state.model, frame, confidence)
+                            if annotated is not None:
+                                processed_frames += 1
+                                # Add frame number
+                                cv2.putText(annotated, f"Frame: {frame_count}", (10, 30), 
+                                          cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                                
+                                # Collect detections
+                                boxes = getattr(results[0], 'boxes', None)
+                                if boxes is not None and hasattr(boxes, 'conf') and len(boxes.conf) > 0:
+                                    for conf, cls in zip(boxes.conf, boxes.cls):
+                                        class_name = st.session_state.model.names.get(int(cls), f"Class_{int(cls)}")
+                                        detections.append({
+                                            "frame": frame_count,
+                                            "object": class_name,
+                                            "confidence": float(conf)
+                                        })
+                                
+                                out.write(annotated)
+                            else:
+                                out.write(frame)
                         else:
                             out.write(frame)
+                    
+                    cap.release()
+                    out.release()
+                    
+                    processing_time = time.time() - start_time
+                    st.session_state.processing_video = False
+                    
+                    progress_bar.progress(1.0)
+                    status_text.text("✅ Processing complete!")
+                    
+                    # Show results
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("Processing Time", f"{processing_time:.1f}s")
+                    with col2:
+                        st.metric("Frames Processed", processed_frames)
+                    with col3:
+                        st.metric("Total Detections", len(detections))
+                    
+                    # Show detection summary
+                    if detections:
+                        st.subheader("🎯 Detection Summary")
+                        detection_summary = {}
+                        for d in detections:
+                            obj = d["object"]
+                            if obj not in detection_summary:
+                                detection_summary[obj] = []
+                            detection_summary[obj].append(d["confidence"])
+                        
+                        summary_data = []
+                        for obj, confs in detection_summary.items():
+                            summary_data.append({
+                                "Object": obj,
+                                "Count": len(confs),
+                                "Avg Confidence": f"{np.mean(confs):.2f}",
+                                "Max Confidence": f"{max(confs):.2f}"
+                            })
+                        
+                        st.dataframe(summary_data, use_container_width=True)
+                        st.markdown(f'<div class="detection-result">🎯 Analysis complete! Found {len(detection_summary)} different object types across {len(detections)} detections.</div>', unsafe_allow_html=True)
                     else:
-                        out.write(frame)
-                
-                cap.release()
-                out.release()
-                
-                processing_time = time.time() - start_time
-                
-                progress_bar.progress(1.0)
-                status_text.text("✅ Processing complete!")
-                
-                # Show results
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.metric("Processing Time", f"{processing_time:.1f}s")
-                    st.metric("Processing FPS", f"{frame_count/processing_time:.1f}")
-                
-                with col2:
-                    st.metric("Total Detections", len(detections))
-                    unique_objects = len(set(d["object"] for d in detections))
-                    st.metric("Unique Objects", unique_objects)
-                
-                # Show detection summary
-                if detections:
-                    st.subheader("🎯 Detection Summary")
-                    detection_summary = {}
-                    for d in detections:
-                        obj = d["object"]
-                        if obj not in detection_summary:
-                            detection_summary[obj] = []
-                        detection_summary[obj].append(d["confidence"])
+                        st.markdown('<div class="warning-box">⚠️ No objects detected in the video. Try lowering the confidence threshold or using a different model.</div>', unsafe_allow_html=True)
                     
-                    summary_data = []
-                    for obj, confs in detection_summary.items():
-                        summary_data.append({
-                            "Object": obj,
-                            "Count": len(confs),
-                            "Avg Confidence": f"{np.mean(confs):.2f}",
-                            "Max Confidence": f"{max(confs):.2f}"
-                        })
+                    # Display processed video
+                    st.subheader("📹 Processed Video")
+                    st.video(out_path)
                     
-                    st.dataframe(summary_data, use_container_width=True)
-                
-                # Display processed video
-                st.subheader("📹 Processed Video")
-                st.video(out_path)
-                
-                # Cleanup
-                os.unlink(tfile.name)
-                # Note: keeping out_path for video display
-
-# Real-time camera mode
-elif mode == "📹 Real-Time Camera":
-    st.subheader("Real-Time Camera Detection")
-    
-    class YOLOProcessor:
-        def __init__(self):
-            self.frame_count = 0
-            self.fps_counter = 0
-            self.last_time = time.time()
-            
-        def recv(self, frame):
-            img = frame.to_ndarray(format="bgr24")
-            self.frame_count += 1
-            self.fps_counter += 1
-            
-            # Calculate FPS
-            current_time = time.time()
-            if current_time - self.last_time >= 1.0:
-                st.session_state.fps = self.fps_counter / (current_time - self.last_time)
-                self.fps_counter = 0
-                self.last_time = current_time
-            
-            # Skip frames for performance
-            if self.frame_count % frame_skip != 0:
-                return av.VideoFrame.from_ndarray(img, format="bgr24")
-            
-            # Run detection
-            try:
-                annotated, results, error = run_inference(st.session_state.model, img, confidence)
-                
-                if error:
-                    return av.VideoFrame.from_ndarray(img, format="bgr24")
-                
-                # Store detections
-                detections = []
-                boxes = getattr(results[0], 'boxes', None)
-                if boxes is not None and hasattr(boxes, 'conf') and len(boxes.conf) > 0:
-                    for conf, cls in zip(boxes.conf, boxes.cls):
-                        class_name = st.session_state.model.names.get(int(cls), f"Class_{int(cls)}")
-                        detections.append(f"{class_name}: {conf:.2f}")
-                
-                st.session_state.detections = detections
-                
-                # Add FPS counter
-                if show_fps:
-                    cv2.putText(annotated, f"FPS: {st.session_state.fps:.1f}", 
-                              (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                
-                return av.VideoFrame.from_ndarray(annotated, format="bgr24")
-                
-            except Exception as e:
-                print(f"Detection error: {e}")
-                return av.VideoFrame.from_ndarray(img, format="bgr24")
-    
-    # WebRTC configuration
-    rtc_config = RTCConfiguration({
-        "iceServers": [
-            {"urls": ["stun:stun.l.google.com:19302"]},
-            {"urls": ["stun:stun1.l.google.com:19302"]},
-        ]
-    })
-    
-    # Camera stream
-    webrtc_ctx = webrtc_streamer(
-        key="yolo-trash-detector",
-        mode=WebRtcMode.SENDRECV,
-        rtc_configuration=rtc_config,
-        video_processor_factory=YOLOProcessor,
-        media_stream_constraints={"video": True, "audio": False},
-        async_processing=True,
-    )
-    
-    # Status display
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if webrtc_ctx.state.playing:
-            st.success("🟢 Camera Active")
-            if show_fps:
-                fps_placeholder = st.empty()
-                fps_placeholder.markdown(f'<div class="fps-counter">FPS: {st.session_state.fps:.1f}</div>', 
-                                       unsafe_allow_html=True)
-        else:
-            st.info("🔴 Camera Inactive - Click START to begin")
-    
-    with col2:
-        if st.session_state.detections:
-            st.subheader("🎯 Live Detections")
-            for detection in st.session_state.detections[:5]:
-                st.write(f"• {detection}")
-            if len(st.session_state.detections) > 5:
-                st.write(f"• ... and {len(st.session_state.detections) - 5} more")
+                    # Cleanup
+                    os.unlink(tfile.name)
 
 # Footer
 st.divider()
 st.markdown("""
 <div style="text-align: center; color: #666; padding: 20px;">
-    <p>🗑️ <strong>YOLO Trash Detector</strong> - Professional AI-Powered Waste Detection</p>
-    <p>Built with Streamlit • YOLOv8 • PyTorch</p>
+    <p>🗑️ <strong>YOLO Trash Detector</strong> - Cloud-Friendly AI Detection System</p>
+    <p>✨ Optimized for Streamlit Cloud Deployment</p>
+    <p>Built with Streamlit • YOLOv8 • OpenCV • PyTorch</p>
 </div>
 """, unsafe_allow_html=True)
