@@ -1,10 +1,12 @@
-# Core ML and Computer Vision (Python 3.10+ compatible)
-# PyTorch with CUDA support - install manually if needed
-
-# YOLO and Computer Vision - stable versions
+# Core ML and Computer Vision
+torch>=2.0.0
+torchvision>=0.15.0
 ultralytics==8.3.169
-opencv-python-headless
-opencv-python
+
+# OpenCV - use headless version for cloud deployment
+opencv-python-headless==4.8.1.78
+
+# Image processing
 numpy==1.26.4
 pillow==10.4.0
 
@@ -12,15 +14,14 @@ pillow==10.4.0
 streamlit==1.28.1
 streamlit-webrtc==0.63.3
 
-# Utilities
-gdown==4.7.1
+# Video processing
 av==14.4.0
 
-# Optional dependencies for better performance
+# Utilities
+gdown==4.7.1
 psutil==7.0.0
-GPUtil==1.4.0
 
-# Scientific computing and visualization
+# Scientific computing
 scipy==1.15.3
 matplotlib==3.10.3
 pandas==2.3.1
@@ -30,8 +31,9 @@ packaging==23.2
 requests==2.32.4
 PyYAML==6.0.2
 tqdm==4.67.1
-
-# Compatibility and utility packages
 typing_extensions==4.14.1
 charset-normalizer==3.4.2
 certifi==2025.7.14
+
+# For better compatibility
+setuptools>=65.0.0
