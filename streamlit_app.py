@@ -189,7 +189,7 @@ with st.sidebar:
     
     drive_url = st.text_input("Or paste Google Drive link to custom model")
     
-    model_path = 'trash_model_v8n.pt'
+    model_path = None
     
     if use_default and not model_file and not drive_url:
         model_path = os.path.join(MODEL_DIR, "yolov8n.pt")
