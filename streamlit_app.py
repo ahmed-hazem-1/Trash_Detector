@@ -176,6 +176,7 @@ def process_image_from_bytes(image_bytes, model, confidence):
         return None, None, str(e)
 
 # Sidebar configuration
+# Sidebar configuration
 with st.sidebar:
     st.header("🔧 Configuration")
     
@@ -185,16 +186,16 @@ with st.sidebar:
     model_file = st.file_uploader("Upload YOLO Model (.pt)", type=["pt"])
     
     # Default model option
-    use_default = st.checkbox("Use YOLOv8n (will download automatically)", value=True)
+    use_default = st.checkbox("Use trash_model_v8n.pt (will download automatically)", value=True)
     
     drive_url = st.text_input("Or paste Google Drive link to custom model")
     
     model_path = None
     
     if use_default and not model_file and not drive_url:
-        model_path = os.path.join(MODEL_DIR, "yolov8n.pt")
+        model_path = os.path.join(MODEL_DIR, "trash_model_v8n.pt")
         if not os.path.exists(model_path):
-            st.info("Default YOLOv8n model will be downloaded on first use")
+            st.info("Default trash_model_v8n.pt model will be downloaded on first use")
     elif model_file is not None:
         model_path = os.path.join(MODEL_DIR, "uploaded_model.pt")
         with open(model_path, "wb") as f:
@@ -223,13 +224,13 @@ with st.sidebar:
         if st.button("🚀 Load Model", type="primary"):
             with st.spinner("Loading model..."):
                 if use_default and not os.path.exists(model_path):
-                    # Download default YOLOv8n model
+                    # Download default trash_model_v8n.pt model
                     try:
-                        model = YOLO('yolov8n.pt')  # This will auto-download
+                        model = YOLO('trash_model_v8n.pt')  # This assumes the model can be auto-downloaded
                         if device == "cuda":
                             model.to("cuda")
                         st.session_state.model = model
-                        st.success("✅ YOLOv8n model loaded successfully!")
+                        st.success("✅ trash_model_v8n.pt model loaded successfully!")
                         st.rerun()
                     except Exception as e:
                         st.error(f"❌ Failed to load default model: {e}")
